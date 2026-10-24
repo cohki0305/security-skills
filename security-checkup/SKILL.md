@@ -63,7 +63,7 @@ bash ${CLAUDE_SKILL_DIR}/checks/mac/run.sh report --data "<diagnosis.json>" --ou
 
 ### 2. 会社診断の準備
 
-- 会社名と PC の台数を聞く（`company.name`、`company.pcCount`）。自由入力でよい。台数が不明なら 0 とし、レポートに任せる。
+- 会社名と PC の台数を聞く（`company.name`、`company.pcCount`）。自由入力でよい。台数が不明なら `pcCount` は入れない（0 にしない）。レポートが「台数は不明」として扱う。
 - 前回の `diagnosis.json` が `outputRoot` の下の日付フォルダにあれば、Read して「前回の答えを使いますか」と聞いてよい。使うなら、答えを引き継ぐ。
 
 ### 3. 会社への質問

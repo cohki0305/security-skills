@@ -100,11 +100,11 @@ describe("I2: 確認できた PC が会社の台数より少ないと、PC の�
     expect(r.level).not.toBe("A");
     expect(r.pcSummary.unchecked).toBe(37);
   });
-  test("全台確認、台数が不明（0 でなく未指定）、PC モードでは下げない", () => {
+  test("全台確認と PC モードでは下げない。台数が不明（未指定）なら下げる", () => {
     expect(build(company(GOOD_ANSWERS, [goodPc("a"), goodPc("b")], 2)).scenes.filter((s) => ids.indexOf(s.id) >= 0).map((s) => s.status)).toEqual(["ok", "ok", "ok"]);
     const d = company(GOOD_ANSWERS, [goodPc()], 1);
     delete d.company.pcCount;
-    expect(build(d).scenes.find((s) => s.id === "pc_loss").status).toBe("ok");
+    expect(build(d).scenes.find((s) => s.id === "pc_loss").status).toBe("unknown");
     const pcMode = { ...company({}, [goodPc()], 38), mode: "pc", role: "employee" };
     expect(build(pcMode).scenes.map((s) => s.status)).toEqual(["ok", "ok", "ok"]);
   });

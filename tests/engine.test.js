@@ -259,6 +259,23 @@ describe("buildReport", () => {
     expect(r.scenes[0].status).toBe("unknown");
     expect(r.pcSummary).toEqual({ total: 38, checked: 0, unchecked: 38, ok: 0, needsAction: 0, unreadable: 0 });
   });
+  test("unknown PC count (missing, 0, fewer than checked): ok pc scene becomes unknown", () => {
+    const all = { ...base(), company: { name: "S", pcCount: 1 } };
+    expect(E.buildReport(all, stubScenes, B, TODAY, questions).scenes.find((s) => s.id === "pc_loss").status).toBe("ok");
+    for (const company of [{ name: "S" }, { name: "S", pcCount: 0 }, { name: "S", pcCount: -1 }, { name: "S", pcCount: "x" }]) {
+      const r = E.buildReport({ ...all, company }, stubScenes, B, TODAY, questions);
+      expect(r.pcSummary.total).toBe(null);
+      expect(r.pcSummary.unchecked).toBe(null);
+      const pc = r.scenes.find((s) => s.id === "pc_loss");
+      expect(pc.status).toBe("unknown");
+      expect(pc.text).toContain("台数がわからない");
+      const html = E.renderReport(r, "admin", { name: "S", date: TODAY });
+      expect(html).toContain("PC 1 台を確認（全体の台数は不明）");
+      expect(html).toContain("未確認の PC があるかどうか判断できません");
+    }
+    const two = E.buildReport({ ...all, company: { name: "S", pcCount: 1 }, pcs: [fx("pc-windows-ok.json"), { ...fx("pc-mac-mixed.json"), label: "別PC" }] }, stubScenes, B, TODAY, questions);
+    expect(two.pcSummary.total).toBe(null);
+  });
   test("pc mode returns only pcScene scenes", () => {
     const r = E.buildReport({ ...base(), mode: "pc", answers: {} }, stubScenes, B, TODAY, questions);
     expect(r.scenes.map((s) => s.id)).toEqual(["pc_loss"]);

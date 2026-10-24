@@ -297,8 +297,10 @@ const SC_ENGINE = (function () {
       else if (sts.every((s) => s === "ok")) ok++;
     });
     const co = isObj(diagnosis.company) ? diagnosis.company : {};
-    const count = typeof co.pcCount === "number" && co.pcCount >= 0 ? co.pcCount : checked;
-    return { total: count, checked, unchecked: Math.max(0, count - checked), ok, needsAction, unreadable: countUnreadable(diagnosis) };
+    // 台数が不明（未入力・0 以下・確認できた台数より少ない）なら total は null にして「全部確認できた」と扱わない
+    const known = typeof co.pcCount === "number" && co.pcCount > 0 && co.pcCount >= checked;
+    const total = known ? co.pcCount : null;
+    return { total, checked, unchecked: known ? total - checked : null, ok, needsAction, unreadable: countUnreadable(diagnosis) };
   }
 
   function buildReport(diagnosis, scenes, baseline, today, questions) {
@@ -329,7 +331,11 @@ const SC_ENGINE = (function () {
       let text = pick(byRole, status);
       let next = pick(s.next, status);
       // 会社の PC の台数より確認できた台数が少ないときは、確認できた分が良くても「守れている」と言わない
-      if (s.pcScene && !pcMode && status === "ok" && summary.unchecked > 0) {
+      if (s.pcScene && !pcMode && status === "ok" && summary.total === null) {
+        status = "unknown";
+        text += "ただし、会社の PC の台数がわからないため、全部の PC を確認できたかは判断できません。";
+        next = "会社の PC の台数を確かめ、まだの社員に「自分の PC の診断」を回してもらう";
+      } else if (s.pcScene && !pcMode && status === "ok" && summary.unchecked > 0) {
         status = "unknown";
         text += "ただし、PC は全部で " + summary.total + " 台あり、まだ " + summary.unchecked + " 台を確認できていないため、全体としては判断できません。";
         next = "残りの " + summary.unchecked + " 台の社員に「自分の PC の診断」を回してもらう";
@@ -411,6 +417,7 @@ const SC_ENGINE = (function () {
     const metaLines = [];
     if (m.date) metaLines.push(dateJa(m.date) + " 診断");
     if (!pcMode && typeof sm.total === "number") metaLines.push("PC " + sm.total + " 台中 " + sm.checked + " 台を確認");
+    else if (!pcMode && typeof sm.checked === "number") metaLines.push("PC " + sm.checked + " 台を確認（全体の台数は不明）");
     const cards = (report.scenes || []).map((s) => {
       const st = STATUS_LABEL[s.status] ? s.status : "unknown";
       return '<div class="scene s-' + STATUS_CLASS[st] + '"><h3>' + esc(s.title) + " " + pill(st) + "</h3>" +
@@ -419,8 +426,11 @@ const SC_ENGINE = (function () {
     const notes = [];
     if (role === "manager" && !pcMode) notes.push("担当者に確認してもらった内容があれば、答えを足して、より詳しく確かめ直せます。この結果は経営者への質問だけで出した目安です。");
     let foot = "";
-    if (!pcMode && (sm.unchecked > 0 || sm.checked === 0)) {
-      foot = '<div class="foot">' + (sm.checked === 0 ? "PC は 1 台も確認できていません（未確認 " + sm.total + " 台）。" : "未確認の PC が " + sm.unchecked + " 台あります。") +
+    if (!pcMode && (sm.unchecked > 0 || sm.checked === 0 || sm.total === null)) {
+      const head = sm.checked === 0 ? "PC は 1 台も確認できていません" + (sm.total === null ? "。" : "（未確認 " + sm.total + " 台）。")
+        : sm.total === null ? "会社の PC の台数がわからないため、未確認の PC があるかどうか判断できません。"
+        : "未確認の PC が " + sm.unchecked + " 台あります。";
+      foot = '<div class="foot">' + head +
         "社員に「自分の PC の診断」を回してもらい、できた結果ファイルを「社員PC結果」フォルダに入れてもらうと、次の診断でこの結果に足されます。</div>";
     }
     if (!pcMode && sm.unreadable > 0) foot += unreadableNote(sm.unreadable);
