@@ -51,6 +51,46 @@ d("windows checks", () => {
     });
   }
 
+  // Runs a snippet with the shared helpers loaded; returns the JSON printed by the snippet.
+  function harness(code) {
+    const r = ps(["-Command", ". '" + skillWin + "\\checks\\windows\\parts\\_common.ps1'; " + code]);
+    return { code: r.code, json: JSON.parse(r.out.trim()) };
+  }
+
+  test("access denied becomes needs_admin with exit code 0 (UnauthorizedAccessException, HResult 0x80070005)", () => {
+    const wrap = (thrown) => "try { throw " + thrown + " } catch { Write-Part ([ordered]@{}) (Get-Unavailable $_) }";
+    for (const t of [
+      "(New-Object UnauthorizedAccessException)",
+      "(New-Object System.Security.SecurityException)",
+      "(New-Object System.Runtime.InteropServices.COMException 'x', -2147024891)",
+      "(New-Object System.InvalidOperationException 'outer', (New-Object UnauthorizedAccessException))",
+    ]) {
+      const r = harness(wrap(t));
+      expect(r.code).toBe(0);
+      expect(r.json.unavailable).toBe("needs_admin");
+    }
+    const other = harness(wrap("'boom'"));
+    expect(other.code).toBe(0);
+    expect(other.json.unavailable).toBe("error");
+    // an English-looking message alone is not treated as a denial
+    expect(harness(wrap("(New-Object Exception 'Access is denied')")).json.unavailable).toBe("error");
+  });
+
+  test("antivirus: third-party active + stale Defender -> no scan date from Defender", () => {
+    const mp = "[pscustomobject]@{AntivirusSignatureLastUpdated=[datetime]'2026-01-01';QuickScanEndTime=[datetime]'2026-01-02';FullScanEndTime=$null}";
+    const third = "@([pscustomobject]@{name='Other AV';enabled=$true;upToDate=$true},[pscustomobject]@{name='Windows Defender';enabled=$false;upToDate=$false})";
+    const a = harness("ConvertTo-Json -Compress (Resolve-AvDates (" + third + ") (" + mp.slice(0) + ") '2026-10-24')");
+    expect(a.json).toEqual({ definitionsUpdatedAt: "2026-10-24", lastScanAt: null });
+    const def = "@([pscustomobject]@{name='Windows Defender';enabled=$true;upToDate=$true})";
+    const b = harness("ConvertTo-Json -Compress (Resolve-AvDates (" + def + ") (" + mp + ") '2026-10-24')");
+    expect(b.json).toEqual({ definitionsUpdatedAt: "2026-01-01", lastScanAt: "2026-01-02" });
+  });
+
+  test("BitLocker state mapping: 1,6 protected; 2,3,4,5,8 not; unknown -> null", () => {
+    const r = harness("ConvertTo-Json -Compress @(1,2,3,4,5,6,8,7,0 | ForEach-Object { $x = Convert-BitLockerState $_; if ($null -eq $x) { 'null' } else { [string]$x } })");
+    expect(r.json).toEqual(["True", "False", "False", "False", "False", "True", "False", "null", "null"]);
+  });
+
   test("check writes a PcResult to a Japanese path with spaces", () => {
     const out = tmpWin + "\\診断 テスト\\結果.json";
     const r = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "check", "-Label", "テスト 太郎", "-Checks", IDS.join(","), "-Out", out]);
