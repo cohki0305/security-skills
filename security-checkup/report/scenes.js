@@ -13,13 +13,26 @@
  *   - 「わからない」「あとで確認」は unknown（engine.answerStatus）
  */
 const SC_SCENES = (function () {
-  // 質問の選択肢 id → PC の部品（cloud_sync）が返す製品名。会社として認めたクラウドの一覧を作るのに使う
+  // 質問の選択肢 id（と「その他」に書かれやすい呼び名）→ PC の部品（cloud_sync）が返す製品名。
+  // 製品名は部品の出力と完全に同じ表記にする: "Google Drive" / "OneDrive" / "Dropbox" / "Box" / "iCloud Drive"。
+  // 部品（Windows・Mac）の出力名を変えるときは、ここも合わせて変える。会社として認めたクラウドの一覧を作るのに使う
   const CLOUD_PRODUCTS = {
     google: ["Google Drive"],
     microsoft: ["OneDrive"],
     dropbox: ["Dropbox"],
     box: ["Box"],
+    icloud: ["iCloud Drive"],
   };
+  // 「その他」の自由記述を製品名にそろえる（大文字小文字と空白は無視）。どれにも当たらなければそのまま
+  function cloudNames(v) {
+    if (CLOUD_PRODUCTS[v]) return CLOUD_PRODUCTS[v];
+    const key = String(v).toLowerCase().replace(/\s+/g, "");
+    for (const id of Object.keys(CLOUD_PRODUCTS)) {
+      if (id === key) return CLOUD_PRODUCTS[id];
+      for (const n of CLOUD_PRODUCTS[id]) if (n.toLowerCase().replace(/\s+/g, "") === key) return [n];
+    }
+    return [String(v)];
+  }
   const RESERVED = ["unknown", "later"];
 
   // 部品の reason のうち、文言で理由として添えるもの
@@ -43,7 +56,7 @@ const SC_SCENES = (function () {
       }
     }
     if (answers[key] === undefined) return null;
-    return { key, kind: "answer", status: engine.answerStatus(answers, key, map) };
+    return { key, kind: "answer", status: engine.answerStatus(answers, key, map), value: answers[key] };
   }
 
   function pcSig(ctx, engine, key, checkId, extra, pcs) {
@@ -70,12 +83,12 @@ const SC_SCENES = (function () {
     if (mail.length === 0 || mail.some(isReserved)) return undefined;
     if (extra.length === 0 || extra.some(isReserved)) return undefined;
     const out = [];
-    const add = (v) => (CLOUD_PRODUCTS[v] || [v]).forEach((n) => { if (out.indexOf(n) < 0) out.push(n); });
+    const add = (v) => cloudNames(v).forEach((n) => { if (out.indexOf(n) < 0) out.push(n); });
     mail.forEach((v) => { if (CLOUD_PRODUCTS[v]) add(v); });
     if (extra.indexOf("yes") >= 0) {
       const which = list(a.cloud_extra_which);
       if (which.length === 0 || which.some(isReserved)) return undefined;
-      which.forEach(add); // 「その他」に書かれた名前もそのまま認めたものとして扱う
+      which.forEach(add); // 「その他」に書かれた名前も、製品名にそろえて認めたものとして扱う
     }
     return out;
   }
@@ -103,6 +116,23 @@ const SC_SCENES = (function () {
   }
   const problems = (s) => (s.counts ? s.counts.bad + s.counts.warn : 0);
   const reasonN = (s, r) => (s.reasons && s.reasons[r]) || 0;
+
+  // PC ごとの理由の台数から文を作る。場面の状態（集計）ではなく、各 PC の理由に合わせるため。
+  // parts: [[台数, 「は、」に続く文]...]。最初の文だけ「31 台中 3 台は、」、続きは「2 台は、」
+  function reasonLines(s, parts, fallbackText) {
+    const used = parts.filter((p) => p[0] > 0);
+    if (used.length === 0) return of(s, problems(s)) + "は、" + fallbackText;
+    if (s.checked === 1) return "この PC は、" + used[0][1];
+    return used.map((p, i) => (i === 0 ? of(s, p[0]) : p[0] + " 台") + "は、" + p[1]).join("");
+  }
+
+  // ok の文言用。その回答や部品が判定に使われ、ok だったか
+  const okSig = (f, key) => ((f && f.signals) || []).some((s) => s.key === key && s.status === "ok");
+  const hasSig = (f, key) => ((f && f.signals) || []).some((s) => s.key === key);
+  const pcChecked = (f) => {
+    const s = ((f && f.signals) || []).find((x) => x.kind === "pc");
+    return s ? s.checked : 0;
+  };
 
   function pcUnknown(s, what) {
     if (!s.checked) return "社員の PC の結果がまだないため、" + what + "を確認できていません。";
@@ -134,7 +164,8 @@ const SC_SCENES = (function () {
       if (role === "manager") lines.push(def.impact[status]);
       else if (role === "admin") {
         const t = sigs[0];
-        const hint = t && def.hint[t.key];
+        // PC が確認できなかったときは設定の手順ではなく、次にやること（next）で案内する
+        const hint = t && !(t.kind === "pc" && status === "unknown") && def.hint[t.key];
         if (hint) lines.push(typeof hint === "function" ? hint(t) : hint);
       } else lines.push(def.employee[status]);
       return lines.join("");
@@ -161,6 +192,19 @@ const SC_SCENES = (function () {
 
   // ---- 場面 ----
 
+  // 回答された分だけを書く。深掘り（保存先・戻せるか）を聞いていなければ、そうとは書かない
+  function backupOk(f) {
+    if (!hasSig(f, "backup_exists")) return "バックアップについては回答がないため、ここには含めていません。";
+    const deep = ["backup_location", "backup_generations", "backup_restore_tested"];
+    if (deep.every((k) => okSig(f, k))) return "バックアップは別の場所にあり、何日か前の分もさかのぼれます。戻せることも試してあります。";
+    const said = [];
+    if (okSig(f, "backup_location")) said.push("別の場所に置いてあります");
+    if (okSig(f, "backup_generations")) said.push("何日か前の分も残っています");
+    if (okSig(f, "backup_restore_tested")) said.push("戻せることも試してあります");
+    const head = "バックアップは取っています" + (said.length ? "。" + said.join("。") : "") + "。";
+    return head + "保存先や、実際に戻せるかの確認は、担当者に聞いてください。";
+  }
+
   const ransomware = makeScene({
     id: "ransomware",
     title: "ランサムウェアに感染したら",
@@ -184,7 +228,7 @@ const SC_SCENES = (function () {
         unknown: () => "バックアップを取っているか、把握している人がいませんでした。",
       },
       backup_location: {
-        bad: () => "バックアップが元のデータと同じ機器や社内のネットワークの中にしかなく、感染すると一緒に暗号化されます。",
+        bad: () => "バックアップが元のデータと同じ機器や社内のネットワークの中にしかなく、感染すると一緒に暗号化されるおそれがあります。",
         unknown: () => "バックアップをどこに置いているか、把握している人がいませんでした。",
       },
       backup_generations: {
@@ -233,9 +277,9 @@ const SC_SCENES = (function () {
       unknown: "担当者が確認する項目です。",
     },
     ok: {
-      manager: () => "バックアップが別の場所にあり、戻せることも確かめてあります。感染しても業務を戻せる状態です。",
-      admin: () => "バックアップは別の場所にあり、さかのぼって戻せます。確認した PC のウイルス対策と OS の更新も動いています。",
-      employee: () => "会社のバックアップは整っています。",
+      manager: (f) => backupOk(f) + "確認した PC のウイルス対策と OS の更新も止まっていません。",
+      admin: (f) => backupOk(f) + "確認した PC のウイルス対策と OS の更新も止まっていません。",
+      employee: () => "この場面で、あなたの PC について直すことはありません。",
     },
     fallback: {
       bad: "感染したときにデータを戻せないおそれがあります。",
@@ -244,6 +288,16 @@ const SC_SCENES = (function () {
     },
     nextFallback: { bad: "バックアップを別の場所にも取る", warn: "バックアップの残し方を見直す", unknown: ASK },
   });
+
+  function departedOk(f) {
+    const said = [];
+    if (okSig(f, "departed_accounts_count")) said.push("辞めた人のアカウントは残っていません。");
+    if (okSig(f, "departed_accounts_process")) said.push(okSig(f, "departed_accounts_days") ? "退職から 1 週間以内に止める手順が回っています。" : "アカウントを止める手順は決まっています。");
+    if (okSig(f, "shared_accounts")) said.push("ID の使い回しもありません。");
+    if (!said.length) return "回答の範囲では、問題は見つかりませんでした。";
+    if (!hasSig(f, "departed_accounts_count")) said.push("止め忘れが残っていないかは、担当者に数えてもらってください。");
+    return said.join("");
+  }
 
   const departed = makeScene({
     id: "departed_accounts",
@@ -274,7 +328,7 @@ const SC_SCENES = (function () {
         unknown: () => "辞めた人のアカウントを退職後いつ止めたか、把握している人がいませんでした。",
       },
       shared_accounts: {
-        warn: () => "何人かで使い回している ID があり、辞めた人もそのパスワードを知ったままです。",
+        warn: () => "何人かで使い回している ID があり、辞めた人もそのパスワードを知っているおそれがあります。",
         unknown: () => "ID を使い回しているシステムがあるか、把握している人がいませんでした。",
       },
       saas_list: {
@@ -307,9 +361,9 @@ const SC_SCENES = (function () {
       unknown: "担当者が確認する項目です。",
     },
     ok: {
-      manager: () => "辞めた人のアカウントは、決まった手順で止められています。",
-      admin: () => "辞めた人のアカウントは残っておらず、止める手順もあります。",
-      employee: () => "辞めた人のアカウントは、決まった手順で止められています。",
+      manager: (f) => departedOk(f),
+      admin: (f) => departedOk(f),
+      employee: () => "この場面で、あなたの PC について直すことはありません。",
     },
     fallback: {
       bad: "辞めた人のアカウントが、止まっていないおそれがあります。",
@@ -318,6 +372,15 @@ const SC_SCENES = (function () {
     },
     nextFallback: { bad: "退職日に止める手順を決める", warn: "使っているサービスと管理者の一覧を作る", unknown: ASK },
   });
+
+  function emailOk(f) {
+    const said = [];
+    if (okSig(f, "mfa_coverage")) said.push("メールは全員が 2 段階認証（スマホでの確認）付きで入る設定です。");
+    else if (okSig(f, "mfa_enabled")) said.push("メールの 2 段階認証（スマホでの確認）は使っています。全員がオンかは、担当者に確かめてください。");
+    if (okSig(f, "saas_admin_known")) said.push("サービスごとの管理者も決まっています。");
+    if (okSig(f, "email_misdelivery")) said.push("誤送信を防ぐ仕組みも入っています。");
+    return said.length ? said.join("") : "回答の範囲では、問題は見つかりませんでした。";
+  }
 
   const email = makeScene({
     id: "email_takeover",
@@ -374,9 +437,9 @@ const SC_SCENES = (function () {
       unknown: "担当者が確認する項目です。",
     },
     ok: {
-      manager: () => "メールは全員がスマホでの確認付きで入る設定になっていて、乗っ取られにくい状態です。",
-      admin: () => "2 段階認証は全員オンで、サービスごとの管理者も決まっています。",
-      employee: () => "会社のメールは、乗っ取られにくい設定になっています。",
+      manager: (f) => emailOk(f),
+      admin: (f) => emailOk(f),
+      employee: () => "この場面で、あなたの PC について直すことはありません。",
     },
     fallback: {
       bad: "メールが乗っ取られやすい状態です。",
@@ -385,6 +448,22 @@ const SC_SCENES = (function () {
     },
     nextFallback: { bad: "全員の 2 段階認証をオンにする", warn: "2 段階認証が全員オンか確かめる", unknown: ASK },
   });
+
+  function remoteOk(f) {
+    const val = (key) => {
+      const s = ((f && f.signals) || []).find((x) => x.key === key);
+      return s ? list(s.value) : [];
+    };
+    const said = [];
+    if (!hasSig(f, "telework")) said.push("社外からの使い方は回答がないため、ここには含めていません。");
+    else if (val("telework").indexOf("yes") < 0) said.push("社外から社内につなぐ使い方はしていません。");
+    else if (!hasSig(f, "vpn_used")) said.push("社外から社内へのつなぎ方は、担当者に確かめてください。");
+    else if (okSig(f, "vpn_updated")) said.push("社外からつなぐための機器（VPN）は、最新の状態か確かめてあります。");
+    else said.push("社外からつなぐのに VPN は使っていません。");
+    if (okSig(f, "remote_desktop")) said.push("社内の PC を外から直接操作する仕組みも使っていません。");
+    said.push("確認した PC にも、外から入られる設定は見つかりませんでした。");
+    return said.join("");
+  }
 
   const remote = makeScene({
     id: "remote_intrusion",
@@ -404,7 +483,8 @@ const SC_SCENES = (function () {
       return result(engine, [
         answerSig(ctx, engine, "telework", { yes: "ok", no: "ok" }),
         answerSig(ctx, engine, "vpn_used", { yes: "ok", no: "ok" }, tele),
-        answerSig(ctx, engine, "vpn_updated", { yes: "ok", no: "warn" }, { telework: ["yes"], vpn_used: ["yes"] }),
+        // VPN 機器は国内のランサムウェアの侵入口で最も多いため、確かめていなければ bad（裁定 9）
+        answerSig(ctx, engine, "vpn_updated", { yes: "ok", no: "bad" }, { telework: ["yes"], vpn_used: ["yes"] }),
         answerSig(ctx, engine, "remote_desktop", { no: "ok", yes: "warn" }, tele),
         usesVpn && vpnPcs.length > 0 ? pcSig(ctx, engine, "vpn_client", "vpn_client", null, vpnPcs) : null,
         pcSig(ctx, engine, "remote_access", "remote_access"),
@@ -415,7 +495,7 @@ const SC_SCENES = (function () {
       telework: { unknown: () => "社外から社内のシステムを使っているか、把握している人がいませんでした。" },
       vpn_used: { unknown: () => "社外から社内につなぐのに VPN を使っているか、把握している人がいませんでした。" },
       vpn_updated: {
-        warn: () => "社外からつなぐための機器（VPN）が最新の状態か、確かめていません。古いままの VPN 機器は、ランサムウェアの侵入口として特に多く狙われます。",
+        bad: () => "社外からつなぐための機器（VPN）が最新の状態か、確かめていません。古いままの VPN 機器は、ランサムウェアの侵入口として最も多く狙われています。",
         unknown: () => "社外からつなぐための機器（VPN）が最新の状態か、把握している人がいませんでした。",
       },
       remote_desktop: {
@@ -448,7 +528,7 @@ const SC_SCENES = (function () {
     next: {
       telework: { unknown: ASK },
       vpn_used: { unknown: ASK },
-      vpn_updated: { warn: "VPN の機器が最新か業者に確かめる", unknown: "VPN の機器が最新か業者に確かめる" },
+      vpn_updated: { bad: "VPN の機器が最新か、今週中に業者に確かめる", unknown: "VPN の機器が最新か業者に確かめる" },
       remote_desktop: { warn: "VPN を通したときだけ使えるようにする", unknown: ASK },
       vpn_client: { warn: (s) => problems(s) + " 台の VPN のソフトを更新する", bad: (s) => problems(s) + " 台の VPN のソフトを更新する", unknown: pcNextUnknown },
       remote_access: { warn: (s) => problems(s) + " 台で、その設定が業務で要るか確かめる", bad: (s) => problems(s) + " 台で、その設定が業務で要るか確かめる", unknown: pcNextUnknown },
@@ -465,9 +545,9 @@ const SC_SCENES = (function () {
       unknown: "担当者が確認する項目です。",
     },
     ok: {
-      manager: () => "外から社内に入る入口は、確認できた範囲では閉じられています。",
-      admin: () => "社外からの入口になる機器と設定は、確認できた範囲で問題ありません。",
-      employee: () => "外から入られる設定は、確認できた範囲で問題ありません。",
+      manager: (f) => remoteOk(f),
+      admin: (f) => remoteOk(f),
+      employee: () => "この PC に、外から入られる設定は見つかりませんでした。",
     },
     fallback: {
       bad: "外から社内に入られる入口が残っています。",
@@ -493,8 +573,8 @@ const SC_SCENES = (function () {
         unknown: (s) => pcUnknown(s, "ディスクの暗号化"),
       },
       screen_lock: {
-        bad: (s) => of(s, problems(s)) + "は、席を離れても画面がすぐにはロックされません。",
-        warn: (s) => of(s, problems(s)) + "は、画面がロックされるまでの時間が長めです。",
+        bad: (s) => lockLine(s),
+        warn: (s) => lockLine(s),
         unknown: (s) => pcUnknown(s, "画面ロック"),
       },
     },
@@ -504,7 +584,7 @@ const SC_SCENES = (function () {
     },
     next: {
       disk_encryption: { bad: (s) => (s.checked === 1 ? "この PC の" : problems(s) + " 台の") + "暗号化をオンにする", warn: (s) => (s.checked === 1 ? "この PC の" : problems(s) + " 台の") + "暗号化をオンにする", unknown: pcNextUnknown },
-      screen_lock: { bad: "10 分以内に画面がロックされるようにする", warn: "10 分以内に画面がロックされるようにする", unknown: pcNextUnknown },
+      screen_lock: { bad: lockNext, warn: lockNext, unknown: pcNextUnknown },
     },
     impact: {
       bad: "PC をなくすと、中の顧客情報が読まれ、取引先への報告やお詫びが必要になるおそれがあります。",
@@ -531,6 +611,16 @@ const SC_SCENES = (function () {
     },
     nextFallback: { bad: "暗号化をオンにする", warn: "暗号化をオンにする", unknown: "社員に「自分の PC の診断」を回してもらう" },
   });
+
+  function lockLine(s) {
+    return reasonLines(s, [
+      [reasonN(s, "no_password"), "パスワードなしで画面を開けるか、画面ロックがかかりません。"],
+      [reasonN(s, "timeout_long"), "画面がロックされるまでの時間が 10 分より長くなっています。"],
+    ], "画面ロックの設定に見直す所があります。");
+  }
+  function lockNext(s) {
+    return reasonN(s, "no_password") ? "画面ロックの解除にパスワードを求める設定にする" : "10 分以内に画面がロックされるようにする";
+  }
 
   function avLine(s) {
     if (s.checked === 1) {
@@ -592,6 +682,19 @@ const SC_SCENES = (function () {
     nextFallback: { bad: "ウイルス対策を動かす", warn: "ウイルス対策を更新する", unknown: "社員に「自分の PC の診断」を回してもらう" },
   });
 
+  function supportLine(s) {
+    return reasonLines(s, [
+      [reasonN(s, "past_end_of_support"), "OS のサポートがもう終わっています。新しく見つかった弱点が直りません。"],
+      [reasonN(s, "support_ending"), "OS のサポートが 3 か月以内に終わります。"],
+    ], "OS のサポート期限に注意が要ります。");
+  }
+  function supportNext(s) {
+    const past = reasonN(s, "past_end_of_support");
+    const n = past || reasonN(s, "support_ending") || problems(s);
+    const what = past ? "OS を新しい版へ上げる" : "OS を新しい版へ上げる準備をする";
+    return s.checked === 1 ? what : n + " 台の " + what;
+  }
+
   const osUpdate = makeScene({
     id: "os_update",
     title: "OS の更新",
@@ -607,8 +710,8 @@ const SC_SCENES = (function () {
     },
     say: {
       os_support: {
-        bad: (s) => of(s, reasonN(s, "past_end_of_support") || problems(s)) + "は、サポートが終わった OS のままで、新しく見つかった弱点が直りません。",
-        warn: (s) => of(s, problems(s)) + "は、OS のサポートが 3 か月以内に終わります。",
+        bad: (s) => supportLine(s),
+        warn: (s) => supportLine(s),
         unknown: (s) => pcUnknown(s, "OS のサポート期限"),
       },
       os_update: {
@@ -625,12 +728,12 @@ const SC_SCENES = (function () {
     hint: {
       os_support: "サポートが終わった OS は、新しい版へ上げるか、PC の買い替えを検討してください。",
       os_update: "更新の画面で止まっている更新を当て、再起動まで済ませてもらってください。",
-      browser: "ブラウザは開き直すと更新されることが多いので、まず再起動をお願いしてください。",
+      browser: "ブラウザは閉じて開き直すと更新が終わることが多いので、まずブラウザの開き直しをお願いしてください。",
     },
     next: {
       os_support: {
-        bad: (s) => (s.checked === 1 ? "OS を新しい版へ上げる" : (reasonN(s, "past_end_of_support") || problems(s)) + " 台の OS を新しい版へ上げる"),
-        warn: (s) => (s.checked === 1 ? "OS を新しい版へ上げる準備をする" : problems(s) + " 台の OS を新しい版へ上げる準備をする"),
+        bad: supportNext,
+        warn: supportNext,
         unknown: pcNextUnknown,
       },
       os_update: {
@@ -646,12 +749,12 @@ const SC_SCENES = (function () {
     },
     impact: {
       bad: "直っていない弱点からウイルスが入りやすく、業務が止まるきっかけになります。",
-      warn: "更新が遅れている PC から、ウイルスが入りやすくなっています。",
+      warn: "更新が遅れている PC や、サポートが切れた OS の PC から、ウイルスが入りやすくなっています。",
       unknown: "PC の更新が止まっていないかどうか、今はわかりません。",
     },
     employee: {
       bad: "担当者に相談してください。",
-      warn: "更新の画面を開いて、更新と再起動を済ませてください。",
+      warn: "できる更新は済ませ、OS の入れ替えが要るものは担当者に相談してください。",
       unknown: "担当者に伝えてください。",
     },
     ok: {
@@ -669,6 +772,15 @@ const SC_SCENES = (function () {
     },
     nextFallback: { bad: "OS を更新する", warn: "OS とブラウザを更新する", unknown: "社員に「自分の PC の診断」を回してもらう" },
   });
+
+  function networkOk(f) {
+    const said = [];
+    if (okSig(f, "wifi_guest_separated")) said.push("来客用の Wi-Fi は分かれています。");
+    if (okSig(f, "wifi_password_changed")) said.push("Wi-Fi のパスワードも変えています。");
+    if (okSig(f, "nas_updated")) said.push("共有フォルダ用の機器も、最新か確かめてあります。");
+    if (okSig(f, "cloud_sync")) said.push("確認した PC の同期ソフトは、会社が使っているものだけです。");
+    return said.length ? said.join("") : "回答の範囲では、問題は見つかりませんでした。";
+  }
 
   const network = makeScene({
     id: "office_network",
@@ -694,7 +806,7 @@ const SC_SCENES = (function () {
         unknown: () => "来客用の Wi-Fi が分かれているか、把握している人がいませんでした。",
       },
       wifi_password_changed: {
-        warn: () => "Wi-Fi のパスワードがずっと同じで、辞めた人もつなげるままです。",
+        warn: () => "Wi-Fi のパスワードがずっと同じで、辞めた人もつなげるおそれがあります。",
         unknown: () => "Wi-Fi のパスワードを変えているか、把握している人がいませんでした。",
       },
       nas_exists: { unknown: () => "共有フォルダ用の機器があるか、把握している人がいませんでした。" },
@@ -736,9 +848,9 @@ const SC_SCENES = (function () {
       unknown: "担当者が確認する項目です。",
     },
     ok: {
-      manager: () => "社内の Wi-Fi と共有フォルダは、確認できた範囲で守られています。",
-      admin: () => "来客用の Wi-Fi は分かれていて、PC の同期ソフトも会社が使っているものだけです。",
-      employee: () => "社内の Wi-Fi と共有フォルダは、確認できた範囲で守られています。",
+      manager: (f) => networkOk(f),
+      admin: (f) => networkOk(f),
+      employee: () => "この PC に、会社が使っていない同期ソフトは見つかりませんでした。",
     },
     fallback: {
       bad: "社内のデータが外に出ていくおそれがあります。",
@@ -747,6 +859,17 @@ const SC_SCENES = (function () {
     },
     nextFallback: { bad: "会社で使うクラウドのサービスを決める", warn: "来客用の Wi-Fi を分ける", unknown: ASK },
   });
+
+  function incidentOk(f) {
+    const said = [];
+    if (okSig(f, "incident_contact")) said.push("事故に気づいたときの最初の連絡先が決まっていて、社員にも伝わっています。");
+    if (okSig(f, "security_owner")) said.push("担当者も決まっています。");
+    if (okSig(f, "incident_vendor")) said.push("相談できる業者の連絡先もすぐ出せます。");
+    if (okSig(f, "incident_procedure")) said.push("事故のときの手順も書いてあります。");
+    if (okSig(f, "training")) said.push("社員への呼びかけもしています。");
+    if (okSig(f, "rules_documented")) said.push("社員が守るルールも文書になっています。");
+    return said.length ? said.join("") : "回答の範囲では、問題は見つかりませんでした。";
+  }
 
   const incident = makeScene({
     id: "incident_response",
@@ -817,8 +940,8 @@ const SC_SCENES = (function () {
       unknown: "おかしいと思ったら、すぐ担当者に知らせてください。",
     },
     ok: {
-      manager: () => "事故に気づいたときの連絡先と手順が決まっていて、社員にも伝わっています。",
-      admin: () => "連絡先・相談先・手順がそろい、社員への呼びかけも続いています。",
+      manager: (f) => incidentOk(f),
+      admin: (f) => incidentOk(f),
       employee: () => "おかしいと思ったら、決められた連絡先へすぐ知らせてください。",
     },
     fallback: {

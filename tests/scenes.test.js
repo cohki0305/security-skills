@@ -169,6 +169,114 @@ describe("場面の判定", () => {
     }
   });
 
+  // 10 台のうち一部だけ部品の結果を差し替える
+  const fleet = (n, patch) => Array.from({ length: 10 }, (_, i) => {
+    const pc = okPc();
+    pc.label = "PC" + i;
+    if (i < n) patch(pc);
+    return pc;
+  });
+
+  test("os_support：10 台中 1 台がサポート終了なら、集計が warn でも「終わっています」と書く", () => {
+    const pcs = fleet(1, (pc) => { pc.osVersion = "10.0.19045"; pc.checks.os_support = { facts: { name: "Windows 10", version: "22H2", build: "19045" }, unavailable: null }; });
+    // ほかの 9 台は 25H2 にして、os_support の問題を 1 台だけにする
+    pcs.slice(1).forEach((pc) => { pc.osVersion = "10.0.26200"; pc.checks.os_support = { facts: { name: "Windows 11", version: "25H2", build: "26200" }, unavailable: null }; });
+    const out = run("os_update", company({}, pcs));
+    const sig = out.facts.signals.find((s) => s.key === "os_support");
+    expect(sig.status).toBe("warn");
+    expect(out.status).toBe("warn");
+    for (const role of ROLES) {
+      const t = byId.os_update.text[role].warn(out.facts);
+      expect(t, role).toContain("10 台中 1 台は、OS のサポートがもう終わっています");
+      expect(t, role).not.toContain("3 か月以内");
+    }
+    expect(byId.os_update.next.warn(out.facts)).toBe("1 台の OS を新しい版へ上げる");
+  });
+
+  test("screen_lock：パスワードなしの PC は、パスワードなしで開けると書く（集計が warn でも）", () => {
+    const pcs = fleet(3, (pc) => { pc.checks.screen_lock = { facts: { timeoutMinutes: null, requiresPassword: false }, unavailable: null }; });
+    const out = run("pc_loss", company({}, pcs));
+    expect(out.status).toBe("warn");
+    for (const role of ROLES) {
+      const t = byId.pc_loss.text[role].warn(out.facts);
+      expect(t, role).toContain("10 台中 3 台は、パスワードなしで画面を開けるか");
+      expect(t, role).not.toContain("長め");
+    }
+    expect(byId.pc_loss.next.warn(out.facts)).toContain("パスワードを求める");
+  });
+
+  test("screen_lock：パスワードなしと時間が長いが混ざると、理由ごとに台数を書く", () => {
+    const pcs = fleet(3, (pc) => { pc.checks.screen_lock = { facts: { timeoutMinutes: null, requiresPassword: false }, unavailable: null }; });
+    pcs[3].checks.screen_lock = { facts: { timeoutMinutes: 20, requiresPassword: true }, unavailable: null };
+    const out = run("pc_loss", company({}, pcs));
+    const t = byId.pc_loss.text.admin[out.status](out.facts);
+    expect(t).toContain("10 台中 3 台は、パスワードなし");
+    expect(t).toContain("1 台は、画面がロックされるまでの時間が 10 分より長く");
+  });
+
+  test("ok の文言は、聞いていない深掘りを事実として書かない", () => {
+    const d = company({ backup_exists: "yes" }, [okPc()]);
+    d.role = "manager";
+    const out = run("ransomware", d);
+    expect(out.status).toBe("ok");
+    for (const role of ["manager", "admin"]) {
+      const t = byId.ransomware.text[role].ok(out.facts);
+      expect(t, role).toContain("バックアップは取っています");
+      expect(t, role).not.toMatch(/戻せることも|別の場所にあり|別の場所に置いて/);
+    }
+    const full = run("ransomware", company({ backup_exists: "yes", backup_location: "separate", backup_generations: "multiple", backup_restore_tested: "yes" }, [okPc()]));
+    expect(byId.ransomware.text.manager.ok(full.facts)).toContain("戻せることも試してあります");
+  });
+
+  test("ok の文言：2 段階認証は全員オンと聞いたときだけ「全員」と書く", () => {
+    const only = run("email_takeover", company({ mfa_enabled: "yes" }));
+    expect(only.status).toBe("ok");
+    expect(byId.email_takeover.text.manager.ok(only.facts)).not.toMatch(/全員が 2 段階認証|全員がスマホ/);
+    const all = run("email_takeover", company({ mfa_enabled: "yes", mfa_coverage: "all" }));
+    expect(byId.email_takeover.text.admin.ok(all.facts)).toContain("全員が 2 段階認証");
+  });
+
+  test("ok の文言：退職者の件数を聞いていなければ「残っていません」と書かない", () => {
+    const out = run("departed_accounts", company({ departed_accounts_process: "yes" }));
+    expect(out.status).toBe("ok");
+    const t = byId.departed_accounts.text.manager.ok(out.facts);
+    expect(t).not.toContain("残っていません");
+    expect(t).toContain("担当者に数えてもらって");
+  });
+
+  test("ok の文言：テレワークありで VPN を聞いていなければ、つなぎ方を断定しない", () => {
+    const out = run("remote_intrusion", company({ telework: "yes" }, [okPc()]));
+    expect(out.status).toBe("ok");
+    const t = byId.remote_intrusion.text.manager.ok(out.facts);
+    expect(t).not.toContain("つなぐ使い方はしていません");
+    expect(t).toContain("担当者に確かめて");
+    const none = run("remote_intrusion", company({ telework: "no" }, [okPc()]));
+    expect(byId.remote_intrusion.text.manager.ok(none.facts)).toContain("つなぐ使い方はしていません");
+  });
+
+  test("vpn_updated が「確かめていない」なら bad（裁定 9）", () => {
+    const out = run("remote_intrusion", company({ telework: "yes", vpn_used: "yes", vpn_updated: "no", remote_desktop: "no" }, [okPc()]));
+    expect(out.status).toBe("bad");
+    expect(byId.remote_intrusion.text.admin.bad(out.facts)).toContain("確かめていません");
+    expect(byId.remote_intrusion.next.bad(out.facts)).toContain("VPN の機器が最新か");
+  });
+
+  test("cloud_sync：「その他」の iCloud なども製品名にそろえて許可に入れる", () => {
+    const pc = okPc();
+    pc.checks.cloud_sync = { facts: { products: ["iCloud Drive", "Google Drive"] }, unavailable: null };
+    const base = { wifi_guest_separated: "separated", wifi_password_changed: "yes", nas_exists: "no", mail_service: "google", cloud_extra: "yes" };
+    expect(run("office_network", company({ ...base, cloud_extra_which: ["icloud"] }, [pc])).status).toBe("ok");
+    expect(run("office_network", company({ ...base, cloud_extra_which: ["iCloud Drive"] }, [pc])).status).toBe("ok");
+    expect(run("office_network", company({ ...base, cloud_extra_which: ["dropbox"] }, [pc])).status).toBe("warn");
+  });
+
+  test("PC が確認できないときは、設定の手順（BitLocker など）を出さない", () => {
+    const pc = okPc();
+    pc.checks.disk_encryption = { facts: {}, unavailable: "needs_admin" };
+    const out = run("pc_loss", company({}, [pc]));
+    expect(byId.pc_loss.text.admin.unknown(out.facts)).not.toContain("BitLocker");
+  });
+
   test("buildReport に通すと全場面の行ができる", () => {
     const d = fx("diagnosis-company.json");
     const r = E.buildReport(d, SCENES, B, TODAY, questions);
