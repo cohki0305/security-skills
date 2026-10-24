@@ -10,13 +10,22 @@
   },
   "answers": {
     "backup_exists": "yes",
+    "backup_location": "same",
+    "backup_generations": "multiple",
     "backup_restore_tested": "later",
+    "departed_accounts_process": "no",
     "departed_accounts_count": "unknown",
-    "mfa_all": "some",
-    "cloud_services": [
-      "gmail",
+    "mfa_enabled": "yes",
+    "mfa_coverage": "some",
+    "mail_service": "google",
+    "cloud_extra": "yes",
+    "cloud_extra_which": [
       "dropbox"
-    ]
+    ],
+    "telework": "yes",
+    "vpn_used": "yes",
+    "vpn_updated": "unknown",
+    "incident_contact": "later"
   },
   "pcs": [
     {
