@@ -14,8 +14,12 @@ const ROOT = resolve(import.meta.dir, "..");
 const IDS = ["antivirus", "disk_encryption", "os_update", "os_support", "firewall", "screen_lock", "local_admin", "remote_access", "vpn_client", "cloud_sync", "browser"];
 const FIXTURE = join(ROOT, "tests/fixtures/diagnosis-company.json");
 
-function ps(args) {
-  const r = spawnSync(PS, ["-NoProfile", "-ExecutionPolicy", "Bypass", ...args], { encoding: "utf8", timeout: 240000 });
+// docsRoot -> SC_DOCS_ROOT (a Windows path), passed through WSL interop via WSLENV
+let DOCS = null; // set in beforeAll: the docs folder whose セキュリティ診断 subfolder is the test output root
+function ps(args, docsRoot) {
+  if (!docsRoot && args.some((a) => /run\.ps1$/.test(a))) docsRoot = DOCS;
+  const env = docsRoot ? { ...process.env, SC_DOCS_ROOT: docsRoot, WSLENV: [process.env.WSLENV, "SC_DOCS_ROOT"].filter(Boolean).join(":") } : process.env;
+  const r = spawnSync(PS, ["-NoProfile", "-ExecutionPolicy", "Bypass", ...args], { encoding: "utf8", timeout: 240000, env });
   return { code: r.status, out: r.stdout || "", err: r.stderr || "" };
 }
 const win = (p) => spawnSync("wslpath", ["-w", p], { encoding: "utf8" }).stdout.trim();
@@ -24,7 +28,7 @@ const lin = (p) => spawnSync("wslpath", ["-u", p], { encoding: "utf8" }).stdout.
 const d = HAS_PS ? describe : describe.skip;
 
 d("windows checks", () => {
-  // tmpLin is the output root (<docs>\セキュリティ診断): the runner only writes inside it, so every check/report gets -DocsRoot
+  // tmpLin is the output root (<docs>\セキュリティ診断): the runner only writes inside it, so every check/report gets SC_DOCS_ROOT
   let docsLin, docsWin, tmpLin, tmpWin, skillWin, user, computer;
   beforeAll(() => {
     const t = ps(["-Command", "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $env:TEMP; $env:USERNAME; $env:COMPUTERNAME"]).out.split(/\r?\n/);
@@ -35,6 +39,7 @@ d("windows checks", () => {
     tmpLin = join(docsLin, "セキュリティ診断");
     mkdirSync(tmpLin, { recursive: true });
     docsWin = win(docsLin);
+    DOCS = docsWin;
     tmpWin = win(tmpLin);
     cpSync(join(ROOT, "security-checkup"), join(tmpLin, "security-checkup"), { recursive: true });
     cpSync(FIXTURE, join(tmpLin, "diagnosis.json"));
@@ -120,7 +125,7 @@ d("windows checks", () => {
 
   test("check writes a PcResult to a Japanese path with spaces", () => {
     const out = tmpWin + "\\診断 テスト\\結果.json";
-    const r = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "check", "-DocsRoot", docsWin, "-Label", "テスト 太郎", "-Checks", IDS.join(","), "-Out", out]);
+    const r = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "check", "-Label", "テスト 太郎", "-Checks", IDS.join(","), "-Out", out]);
     expect(r.code).toBe(0);
     const file = join(tmpLin, "診断 テスト", "結果.json");
     expect(existsSync(file)).toBe(true);
@@ -144,7 +149,7 @@ d("windows checks", () => {
 
   test("report copies 9 files (HTML 3 + baseline/engine/scenes + questions/data/pcs .js) into a Japanese path with spaces", () => {
     const outDir = tmpWin + "\\診断 レポート";
-    const r = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "report", "-DocsRoot", docsWin, "-Data", tmpWin + "\\diagnosis.json", "-OutDir", outDir, "-NoOpen"]);
+    const r = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "report", "-Data", tmpWin + "\\diagnosis.json", "-OutDir", outDir, "-NoOpen"]);
     expect(r.code).toBe(0);
     const dir = join(tmpLin, "診断 レポート");
     expect(readdirSync(dir).sort()).toEqual(["asklist.html", "baseline.js", "data.js", "engine.js", "pcs.html", "pcs.js", "questions.js", "report.html", "scenes.js"]);
@@ -166,7 +171,7 @@ d("windows checks", () => {
     const evil = '{"a":"x\\"});globalThis.pwned=1;//","b":"</script><script>globalThis.pwned=2</script>","d":"raw \u2028 \u2029 chars"}';
     writeFileSync(join(tmpLin, "evil.json"), evil, "utf8");
     const outDir = tmpWin + "\\evil out";
-    const r = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "report", "-DocsRoot", docsWin, "-Data", tmpWin + "\\evil.json", "-OutDir", outDir, "-NoOpen"]);
+    const r = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "report", "-Data", tmpWin + "\\evil.json", "-OutDir", outDir, "-NoOpen"]);
     expect(r.code).toBe(0);
     const js = readFileSync(join(tmpLin, "evil out", "data.js"), "utf8");
     expect(js).not.toContain("<");
@@ -178,7 +183,7 @@ d("windows checks", () => {
     expect(vm.runInContext("typeof pwned", ctx)).toBe("undefined");
     for (const [i, bad] of ["1;globalThis.pwned=1", '"x"});alert(1)//'].entries()) {
       writeFileSync(join(tmpLin, "expr" + i + ".json"), bad, "utf8");
-      const x = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "report", "-DocsRoot", docsWin, "-Data", tmpWin + "\\expr" + i + ".json", "-OutDir", tmpWin + "\\expr-out" + i, "-NoOpen"]);
+      const x = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "report", "-Data", tmpWin + "\\expr" + i + ".json", "-OutDir", tmpWin + "\\expr-out" + i, "-NoOpen"]);
       expect(x.code).not.toBe(0);
       expect(existsSync(join(tmpLin, "expr-out" + i, "data.js"))).toBe(false);
     }
@@ -193,7 +198,7 @@ d("windows checks", () => {
     writeFileSync(join(dirLin, "bad.json"), '{ not json </script><script>globalThis.pwned=1</script>\u2028', "utf8");
     writeFileSync(join(dirLin, "notes.txt"), "not a json file", "utf8");
     const outLin = join(tmpLin, "pcs out");
-    const base = ["-File", skillWin + "\\checks\\windows\\run.ps1", "report", "-DocsRoot", docsWin, "-Data", tmpWin + "\\diagnosis.json", "-OutDir", tmpWin + "\\pcs out", "-NoOpen"];
+    const base = ["-File", skillWin + "\\checks\\windows\\run.ps1", "report", "-Data", tmpWin + "\\diagnosis.json", "-OutDir", tmpWin + "\\pcs out", "-NoOpen"];
     expect(ps([...base, "-PcsDir", tmpWin + "\\社員 PC結果"]).code).toBe(0);
     const js = readFileSync(join(outLin, "pcs.js"), "utf8");
     expect(js).not.toContain("<");
@@ -216,7 +221,7 @@ d("windows checks", () => {
   });
 
   test("paths prints JSON with the output and employee folders", () => {
-    const r = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "paths", "-DocsRoot", tmpWin + "\\ドキュメント 仮"]);
+    const r = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "paths"], tmpWin + "\\ドキュメント 仮");
     expect(r.code).toBe(0);
     const j = JSON.parse(r.out.trim());
     expect(j.outputRoot).toContain("セキュリティ診断");
@@ -226,13 +231,16 @@ d("windows checks", () => {
   test("-Out / -OutDir outside the output root, with .., or not .json are refused and nothing is written", () => {
     const runner = skillWin + "\\checks\\windows\\run.ps1";
     const bad = [
-      ["check", "-DocsRoot", docsWin, "-Label", "x", "-Checks", "firewall", "-Out", docsWin + "\\outside.json"],
-      ["check", "-DocsRoot", docsWin, "-Label", "x", "-Checks", "firewall", "-Out", tmpWin + "\\..\\escape.json"],
-      ["check", "-DocsRoot", docsWin, "-Label", "x", "-Checks", "firewall", "-Out", tmpWin + "\\a.txt"],
-      ["report", "-DocsRoot", docsWin, "-Data", tmpWin + "\\diagnosis.json", "-OutDir", docsWin + "\\elsewhere", "-NoOpen"],
-      ["report", "-DocsRoot", docsWin, "-Data", tmpWin + "\\diagnosis.json", "-OutDir", tmpWin + "\\sub\\..\\..\\up", "-NoOpen"],
+      ["check", "-Label", "x", "-Checks", "firewall", "-Out", docsWin + "\\outside.json"],
+      ["check", "-Label", "x", "-Checks", "firewall", "-Out", tmpWin + "\\..\\escape.json"],
+      ["check", "-Label", "x", "-Checks", "firewall", "-Out", tmpWin + "\\a.txt"],
+      ["report", "-Data", tmpWin + "\\diagnosis.json", "-OutDir", docsWin + "\\elsewhere", "-NoOpen"],
+      ["report", "-Data", tmpWin + "\\diagnosis.json", "-OutDir", tmpWin + "\\sub\\..\\..\\up", "-NoOpen"],
     ];
     for (const args of bad) expect(ps(["-File", runner, ...args]).code, args.join(" ")).not.toBe(0);
+    // the output root cannot be moved from the command line
+    expect(ps(["-File", runner, "check", "-DocsRoot", docsWin + "\\x", "-Label", "x", "-Checks", "firewall", "-Out", docsWin + "\\x\\セキュリティ診断\\m.json"]).code).not.toBe(0);
+    expect(existsSync(join(docsLin, "x"))).toBe(false);
     for (const f of ["outside.json", "escape.json", "elsewhere", "up"]) expect(existsSync(join(docsLin, f))).toBe(false);
     expect(existsSync(join(tmpLin, "a.txt"))).toBe(false);
   });

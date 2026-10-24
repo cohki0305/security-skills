@@ -6,7 +6,6 @@
   [string]$Data,
   [string]$OutDir,
   [string]$PcsDir,
-  [string]$DocsRoot,
   [switch]$NoOpen
 )
 # Read-only diagnosis runner. Only writes the files the caller asks for (-Out / -OutDir) and the output folders of "paths".
@@ -29,7 +28,8 @@ function ConvertTo-JsLiteral([string]$text) {
   return $lit
 }
 function Get-Roots() {
-  $docs = $DocsRoot
+  # Test override only (environment, like run.sh). Not a parameter, so the command line cannot move the output root.
+  $docs = $env:SC_DOCS_ROOT
   if (-not $docs) { $docs = [Environment]::GetFolderPath("MyDocuments") }
   # "Security diagnosis" and "Employee PC results" folder names
   $root = Join-Path $docs ([regex]::Unescape('セキュリティ診断'))
