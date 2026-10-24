@@ -4,6 +4,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, cpSync, rmSync } from
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import vm from "node:vm";
+import { createRequire } from "node:module";
+const { runPage } = createRequire(import.meta.url)("./helpers/page.js");
 import { writeFileSync } from "node:fs";
 
 const PS = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
@@ -93,6 +95,26 @@ d("windows checks", () => {
     expect(r.json).toEqual(["True", "False", "False", "False", "False", "True", "False", "null", "null"]);
   });
 
+  test("screen lock: sleep (not display-off) is the trigger; worst of AC and battery; unreadable -> unknown", () => {
+    const run = (plans, cands = "@()", readable = "$true") =>
+      harness("$p = @(" + plans + "); $s = Get-SleepLock $p; $c = @(" + cands + "); if ($null -ne $s) { $c += $s }; ConvertTo-Json -Compress (Resolve-ScreenLock $c " + readable + ")").json;
+    const plan = (idle, lock) => "[pscustomobject]@{Idle=" + idle + ";Lock=" + lock + "}";
+    // display turns off but the PC never sleeps (STANDBYIDLE 0) -> nothing locks
+    expect(run(plan(0, 1) + "," + plan(0, 1))).toEqual({ timeoutMinutes: null, requiresPassword: false });
+    // AC sleeps late, battery early: the longer one counts
+    expect(run(plan(1800, 1) + "," + plan(300, 1))).toEqual({ timeoutMinutes: 30, requiresPassword: true });
+    // one plan never sleeps -> nothing locks
+    expect(run(plan(600, 1) + "," + plan(0, 1))).toEqual({ timeoutMinutes: null, requiresPassword: false });
+    // sleep without sign-in on wake does not need a password
+    expect(run(plan(600, 1) + "," + plan(600, 0))).toEqual({ timeoutMinutes: 10, requiresPassword: false });
+    expect(run(plan(600, 1) + "," + plan(600, 1))).toEqual({ timeoutMinutes: 10, requiresPassword: true });
+    // unreadable plans are skipped; nothing readable and no other lock -> unknown
+    expect(run(plan("$null", "$null") + "," + plan(900, 1))).toEqual({ timeoutMinutes: 15, requiresPassword: true });
+    expect(run(plan("$null", "$null") + "," + plan("$null", "$null"), "@()", "$false")).toEqual({ timeoutMinutes: null, requiresPassword: null });
+    // a screen saver with a password still counts when the PC never sleeps
+    expect(run(plan(0, 1), "[pscustomobject]@{Minutes=5;Password=$true}")).toEqual({ timeoutMinutes: 5, requiresPassword: true });
+  });
+
   test("check writes a PcResult to a Japanese path with spaces", () => {
     const out = tmpWin + "\\診断 テスト\\結果.json";
     const r = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "check", "-Label", "テスト 太郎", "-Checks", IDS.join(","), "-Out", out]);
@@ -117,12 +139,12 @@ d("windows checks", () => {
     if (computer) expect(txt).not.toContain(computer.toLowerCase());
   });
 
-  test("report copies 8 files into a Japanese path with spaces", () => {
+  test("report copies 9 files (HTML 3 + baseline/engine/scenes + questions/data/pcs .js) into a Japanese path with spaces", () => {
     const outDir = tmpWin + "\\診断 レポート";
     const r = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "report", "-Data", tmpWin + "\\diagnosis.json", "-OutDir", outDir, "-NoOpen"]);
     expect(r.code).toBe(0);
     const dir = join(tmpLin, "診断 レポート");
-    expect(readdirSync(dir).sort()).toEqual(["asklist.html", "baseline.js", "data.js", "engine.js", "pcs.html", "questions.js", "report.html", "scenes.js"]);
+    expect(readdirSync(dir).sort()).toEqual(["asklist.html", "baseline.js", "data.js", "engine.js", "pcs.html", "pcs.js", "questions.js", "report.html", "scenes.js"]);
     const data = readFileSync(join(dir, "data.js"), "utf8");
     expect(data.startsWith('window.SC_DATA = JSON.parse("')).toBe(true);
     const sandbox = { window: {} };
@@ -157,6 +179,37 @@ d("windows checks", () => {
       expect(x.code).not.toBe(0);
       expect(existsSync(join(tmpLin, "expr-out" + i, "data.js"))).toBe(false);
     }
+  });
+
+  test("report -PcsDir: one literal per *.json (bad JSON and hostile text included), nothing runs, stale results are cleared", () => {
+    const dirLin = join(tmpLin, "社員 PC結果");
+    mkdirSync(dirLin, { recursive: true });
+    const good = JSON.parse(readFileSync(join(ROOT, "tests/fixtures/pc-windows-ok.json"), "utf8"));
+    writeFileSync(join(dirLin, "good.json"), JSON.stringify(good), "utf8");
+    writeFileSync(join(dirLin, "html label.json"), JSON.stringify({ ...good, label: "<img src=x onerror=alert(1)>" }), "utf8");
+    writeFileSync(join(dirLin, "bad.json"), '{ not json </script><script>globalThis.pwned=1</script>\u2028', "utf8");
+    writeFileSync(join(dirLin, "notes.txt"), "not a json file", "utf8");
+    const outLin = join(tmpLin, "pcs out");
+    const base = ["-File", skillWin + "\\checks\\windows\\run.ps1", "report", "-Data", tmpWin + "\\diagnosis.json", "-OutDir", tmpWin + "\\pcs out", "-NoOpen"];
+    expect(ps([...base, "-PcsDir", tmpWin + "\\社員 PC結果"]).code).toBe(0);
+    const js = readFileSync(join(outLin, "pcs.js"), "utf8");
+    expect(js).not.toContain("<");
+    expect(js).not.toContain("\u2028");
+    const sandbox = { window: {}, globalThis: null };
+    vm.runInContext(js, vm.createContext(sandbox));
+    expect(sandbox.window.SC_PCS.length).toBe(3);
+    expect(sandbox.window.SC_PCS.every((x) => typeof x === "string")).toBe(true);
+    expect(sandbox.window.SC_PCS.some((x) => x.startsWith("{ not json </script>"))).toBe(true);
+    expect(sandbox.pwned).toBeUndefined();
+    const page = runPage("pcs.html", outLin);
+    expect(page.sandbox.pwned).toBeUndefined();
+    expect(page.html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(page.html).not.toMatch(/<img|<script/);
+    expect(page.html).toContain("読めなかった社員の結果ファイルが 1 件");
+    // without -PcsDir a re-run clears the old results
+    expect(ps(base).code).toBe(0);
+    expect(readFileSync(join(outLin, "pcs.js"), "utf8").replace(/\s/g, "")).toBe("window.SC_PCS=[];");
+    expect(ps([...base.slice(0, 6), tmpWin + "\\pcs out2", "-NoOpen", "-PcsDir", tmpWin + "\\nope"]).code).not.toBe(0);
   });
 
   test("paths prints JSON with the output and employee folders", () => {

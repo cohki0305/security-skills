@@ -2,7 +2,7 @@
 # Read-only diagnosis runner for macOS (bash 3.2). Only writes the files the caller asks for (--out / --outdir) and the folders of "paths".
 #   run.sh paths
 #   run.sh check --label <name> --checks <id,id,...> --out <file>
-#   run.sh report --data <diagnosis.json> --outdir <folder> [--no-open]
+#   run.sh report --data <diagnosis.json> --outdir <folder> [--pcs-dir <folder>] [--no-open]
 # Test overrides: SC_DOCS_ROOT (documents folder), SC_PARTS_DIR (parts folder).
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -11,7 +11,7 @@ PARTS="${SC_PARTS_DIR:-$HERE/parts}"
 ALL="antivirus disk_encryption os_update os_support firewall screen_lock local_admin remote_access vpn_client cloud_sync browser"
 
 die() { printf '%s\n' "$1" >&2; exit 1; }
-usage() { die "usage: run.sh paths | check --label <name> --checks <ids> --out <file> | report --data <diagnosis.json> --outdir <folder> [--no-open]"; }
+usage() { die "usage: run.sh paths | check --label <name> --checks <ids> --out <file> | report --data <diagnosis.json> --outdir <folder> [--pcs-dir <folder>] [--no-open]"; }
 
 json_str() {
   printf '"'
@@ -141,11 +141,12 @@ cmd_check() {
 }
 
 cmd_report() {
-  local data="" outdir="" noopen=0 f q d
+  local data="" outdir="" pcsdir="" noopen=0 f q d first size item
   while [ $# -gt 0 ]; do
     case "$1" in
       --data) [ $# -ge 2 ] || usage; data="$2"; shift 2 ;;
       --outdir) [ $# -ge 2 ] || usage; outdir="$2"; shift 2 ;;
+      --pcs-dir) [ $# -ge 2 ] || usage; pcsdir="$2"; shift 2 ;;
       --no-open) noopen=1; shift ;;
       *) usage ;;
     esac
@@ -153,6 +154,7 @@ cmd_report() {
   [ -n "$data" ] || die "--data is required"
   [ -n "$outdir" ] || die "--outdir is required"
   [ -f "$data" ] || die "data file not found"
+  if [ -n "$pcsdir" ]; then [ -d "$pcsdir" ] || die "pcs folder not found"; fi
   d=$(cat "$data")
   printf '%s' "$d" | json_balanced || die "data is not valid JSON"
   mkdir -p "$outdir" || die "cannot create output folder"
@@ -162,6 +164,22 @@ cmd_report() {
   q=$(cat "$SKILL/questions/company.json")
   printf 'window.SC_QUESTIONS = JSON.parse(%s);\n' "$(js_literal "$q")" > "$outdir/questions.js"
   printf 'window.SC_DATA = JSON.parse(%s);\n' "$(js_literal "$d")" > "$outdir/data.js"
+  # Employee result files: one JS string literal per *.json file, never parsed or run here. The page parses each one
+  # inside its own try, so a broken or hostile file only counts as "unreadable". Always rewritten (no stale results).
+  {
+    printf 'window.SC_PCS = ['
+    first=1
+    if [ -n "$pcsdir" ]; then
+      for f in "$pcsdir"/*.json; do
+        [ -f "$f" ] || continue
+        size=$(wc -c < "$f" | tr -d ' ')
+        if [ "${size:-0}" -gt 1048576 ]; then item=$(js_literal "too large"); else item=$(js_literal "$(cat "$f")"); fi
+        if [ "$first" -eq 1 ]; then first=0; else printf ','; fi
+        printf '\n%s' "$item"
+      done
+    fi
+    printf '];\n'
+  } > "$outdir/pcs.js"
   if [ "$noopen" -eq 0 ]; then open "$outdir/report.html" >/dev/null 2>&1; fi
   printf '{"report":%s}\n' "$(json_str "$outdir/report.html")"
 }

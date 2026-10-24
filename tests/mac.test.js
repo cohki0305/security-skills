@@ -4,6 +4,8 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import vm from "node:vm";
+import { createRequire } from "node:module";
+const { runPage } = createRequire(import.meta.url)("./helpers/page.js");
 
 const ROOT = resolve(import.meta.dir, "..");
 const MAC = join(ROOT, "security-checkup/checks/mac");
@@ -291,13 +293,13 @@ describe("mac run.sh", () => {
     expect(run(join(MAC, "run.sh"), ["check", "--label", "x"]).code).not.toBe(0);
   });
 
-  test("report copies 8 files into a Japanese path with spaces", () => {
+  test("report copies 9 files (HTML 3 + baseline/engine/scenes + questions/data/pcs .js) into a Japanese path with spaces", () => {
     const outDir = join(tmp, "診断 レポート");
     const log = join(tmp, "open.log");
     const r = run(join(MAC, "run.sh"), ["report", "--data", FIXTURE, "--outdir", outDir, "--no-open"], { SHIM_OPEN_LOG: log });
     expect(r.code).toBe(0);
     expect(JSON.parse(r.out.trim()).report).toBe(join(outDir, "report.html"));
-    expect(readdirSync(outDir).sort()).toEqual(["asklist.html", "baseline.js", "data.js", "engine.js", "pcs.html", "questions.js", "report.html", "scenes.js"]);
+    expect(readdirSync(outDir).sort()).toEqual(["asklist.html", "baseline.js", "data.js", "engine.js", "pcs.html", "pcs.js", "questions.js", "report.html", "scenes.js"]);
     const w = loadJs(join(outDir, "data.js"), join(outDir, "questions.js"));
     expect(readFileSync(join(outDir, "data.js"), "utf8").startsWith("window.SC_DATA = JSON.parse(\"")).toBe(true);
     expect(w.SC_DATA.mode).toBe("company");
@@ -346,6 +348,43 @@ describe("mac run.sh", () => {
     const j = JSON.parse(readFileSync(out, "utf8"));
     expect(Object.keys(j.checks)).toEqual(["firewall", "*", "local_admin"]);
     expect(j.checks["*"]).toEqual({ facts: {}, unavailable: "not_supported" });
+  });
+
+  test("report --pcs-dir: one literal per *.json (bad JSON and hostile text included), nothing runs, stale results are cleared", () => {
+    const dir = join(tmp, "社員 PC結果");
+    mkdirSync(dir, { recursive: true });
+    const good = JSON.parse(readFileSync(join(ROOT, "tests/fixtures/pc-windows-ok.json"), "utf8"));
+    writeFileSync(join(dir, "good.json"), JSON.stringify(good));
+    writeFileSync(join(dir, "html label.json"), JSON.stringify({ ...good, label: "<img src=x onerror=alert(1)>" }));
+    writeFileSync(join(dir, "bad.json"), '{ not json </script><script>globalThis.pwned=1</script>');
+    writeFileSync(join(dir, "sep.json"), '{"label":"a\u2028b","checks":{}}'.replace("\\u2028", "\u2028"));
+    writeFileSync(join(dir, "notes.txt"), "not a json file");
+    const outDir = join(tmp, "pcs out");
+    expect(run(join(MAC, "run.sh"), ["report", "--data", FIXTURE, "--outdir", outDir, "--pcs-dir", dir, "--no-open"]).code).toBe(0);
+    const js = readFileSync(join(outDir, "pcs.js"), "utf8");
+    expect(js).not.toContain("<");
+    expect(js).not.toContain("\u2028");
+    expect(js.startsWith("window.SC_PCS = [")).toBe(true);
+    const sandbox = { window: {}, globalThis: null };
+    vm.runInContext(js, vm.createContext(sandbox));
+    expect(sandbox.window.SC_PCS.length).toBe(4);
+    expect(sandbox.window.SC_PCS.every((x) => typeof x === "string")).toBe(true);
+    expect(sandbox.window.SC_PCS).toContain(readFileSync(join(dir, "bad.json"), "utf8"));
+    expect(sandbox.window.SC_PCS.map((x) => { try { return JSON.parse(x).label; } catch (e) { return null; } })).toContain("<img src=x onerror=alert(1)>");
+    // the page: each file is parsed on its own; the broken one is counted, the rest still show, and the label is escaped
+    for (const f of ["report.html", "pcs.html"]) {
+      const page = runPage(f, outDir);
+      expect(page.sandbox.pwned, f).toBeUndefined();
+      expect(page.html, f).not.toContain("レポートを表示できませんでした");
+      expect(page.html, f).not.toMatch(/<img|<script/);
+      expect(page.html, f).toContain("読めなかった社員の結果ファイルが 1 件");
+    }
+    expect(runPage("pcs.html", outDir).html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    // without --pcs-dir a re-run clears the old results
+    expect(run(join(MAC, "run.sh"), ["report", "--data", FIXTURE, "--outdir", outDir, "--no-open"]).code).toBe(0);
+    expect(readFileSync(join(outDir, "pcs.js"), "utf8").replace(/\s/g, "")).toBe("window.SC_PCS=[];");
+    // a missing folder is an error
+    expect(run(join(MAC, "run.sh"), ["report", "--data", FIXTURE, "--outdir", join(tmp, "x"), "--pcs-dir", join(tmp, "nope"), "--no-open"]).code).not.toBe(0);
   });
 
   test("report rejects invalid data", () => {

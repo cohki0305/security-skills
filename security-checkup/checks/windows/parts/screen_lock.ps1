@@ -28,28 +28,20 @@ try {
   if ($null -ne $ina -and [int64]$ina -gt 0) {
     $cands += [pscustomobject]@{ Minutes = [Math]::Ceiling([int64]$ina / 60.0); Password = $true }
   }
-  # screen turns off + sign-in required on wake (power plan, readable without admin)
-  $lockMin = $null
+  # sleep + sign-in required on wake (power plan, readable without admin). Display-off alone does not lock the PC.
+  $plans = @()
+  $readable = $false
   foreach ($kind in @("ac", "dc")) {
-    $idle = Get-PowerIndex "SUB_VIDEO" "VIDEOIDLE" $kind
+    $idle = Get-PowerIndex "SUB_SLEEP" "STANDBYIDLE" $kind
     $lock = Get-PowerIndex "SUB_NONE" "CONSOLELOCK" $kind
-    if ($null -ne $idle -and $idle -gt 0 -and $lock -eq 1) {
-      $m = [Math]::Ceiling($idle / 60.0)
-      if ($null -eq $lockMin -or $m -lt $lockMin) { $lockMin = $m }
-    }
+    if ($null -ne $idle) { $readable = $true }
+    $plans += [pscustomobject]@{ Idle = $idle; Lock = $lock }
   }
-  if ($null -ne $lockMin) { $cands += [pscustomobject]@{ Minutes = $lockMin; Password = $true } }
-  $withPw = @($cands | Where-Object { $_.Password })
-  if ($withPw.Count -gt 0) {
-    $facts["timeoutMinutes"] = [int](($withPw | Sort-Object Minutes)[0].Minutes)
-    $facts["requiresPassword"] = $true
-  } elseif ($cands.Count -gt 0) {
-    $facts["timeoutMinutes"] = [int](($cands | Sort-Object Minutes)[0].Minutes)
-    $facts["requiresPassword"] = $false
-  } else {
-    $facts["timeoutMinutes"] = $null
-    $facts["requiresPassword"] = $false
-  }
+  $sleep = Get-SleepLock $plans
+  if ($null -ne $sleep) { $cands += $sleep }
+  $f = Resolve-ScreenLock $cands $readable
+  $facts["timeoutMinutes"] = $f["timeoutMinutes"]
+  $facts["requiresPassword"] = $f["requiresPassword"]
 } catch {
   $facts = [ordered]@{}
   $unavailable = Get-Unavailable $_

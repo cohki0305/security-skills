@@ -98,6 +98,14 @@ bash security-checkup/checks/mac/run.sh check --label "テスト 花子" --out "
 
 `診断 テスト` フォルダの中に `結果.json` ができれば合格です。
 
+続けて、このフォルダを「社員PC結果」の代わりにして、レポートに取り込めるかも確かめます。
+
+```
+bash security-checkup/checks/mac/run.sh report --data tests/fixtures/diagnosis-company.json --outdir ~/Desktop/mac-report --pcs-dir "$HOME/Desktop/診断 テスト"
+```
+
+`mac-report` の中に `pcs.js` ができ、「PC ごとの結果」のページに、`テスト 花子` の PC が 1 台出れば合格です（見本のデータの PC と並んで出ます）。
+
 ## 6. 後片付け
 
 デスクトップの `mac-result.json`、`mac-report` フォルダ、`診断 テスト` フォルダは、確認が終わったら捨てて構いません。「書類」の「セキュリティ診断」フォルダは、本番でも使うので残して構いません。

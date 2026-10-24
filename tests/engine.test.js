@@ -134,13 +134,15 @@ describe("latestPcs / aggregatePcs", () => {
   test("unknown present without bad/warn -> unknown", () => {
     expect(E.aggregatePcs([pcWith(1, true), pcWith(2, null)], "disk_encryption", ctx).status).toBe("unknown");
   });
-  test("old-format PcResult (no checks / missing id) does not throw, counts as unknown", () => {
+  test("old-format PcResult (missing id) counts as unknown; one with no checks object at all is unreadable and not counted", () => {
     const noChecks = { version: 1, label: "古い", checkedAt: TODAY, os: "windows" };
     const missing = { version: 1, label: "欠け", checkedAt: TODAY, os: "windows", checks: {} };
-    const r = E.aggregatePcs([noChecks, missing], "antivirus", ctx);
-    expect(r.counts.unknown).toBe(2);
+    const r = E.aggregatePcs([missing], "antivirus", ctx);
+    expect(r.counts.unknown).toBe(1);
     expect(r.status).toBe("unknown");
-    expect(E.latestPcs([noChecks, missing]).length).toBe(2);
+    expect(E.latestPcs([noChecks, missing]).length).toBe(1);
+    // aggregatePcs given an unreadable entry directly still does not throw and counts it as unknown
+    expect(E.aggregatePcs([noChecks, "x", null], "antivirus", ctx).counts.unknown).toBe(3);
   });
   test("fixture mixed pcs aggregate os_support per pc os", () => {
     const r = E.aggregatePcs([fx("pc-windows-ok.json"), fx("pc-mac-mixed.json")], "os_support", ctx);
@@ -235,11 +237,12 @@ describe("buildReport", () => {
     expect(r.baselineAsOf).toBe(B.asOf);
   });
   test("scene text/next by role and status", () => {
-    const r = E.buildReport(base(), stubScenes, B, TODAY, questions);
+    const all = { ...base(), company: { name: "S", pcCount: 1 } };
+    const r = E.buildReport(all, stubScenes, B, TODAY, questions);
     const pc = r.scenes.find((s) => s.id === "pc_loss");
     expect(pc).toEqual({ id: "pc_loss", title: "PC紛失", status: "ok", text: "OK 1", next: "n-ok" });
     expect(r.scenes.find((s) => s.id === "backup").status).toBe("unknown");
-    const m = E.buildReport({ ...base(), role: "manager" }, stubScenes, B, TODAY, questions);
+    const m = E.buildReport({ ...all, role: "manager" }, stubScenes, B, TODAY, questions);
     expect(m.scenes[0].text).toBe("m-ok");
   });
   test("asklist from unknown/later answers, skipping ids with no question", () => {
@@ -254,7 +257,7 @@ describe("buildReport", () => {
     const d = { ...base(), pcs: [] };
     const r = E.buildReport(d, stubScenes, B, TODAY, questions);
     expect(r.scenes[0].status).toBe("unknown");
-    expect(r.pcSummary).toEqual({ total: 38, checked: 0, unchecked: 38, ok: 0, needsAction: 0 });
+    expect(r.pcSummary).toEqual({ total: 38, checked: 0, unchecked: 38, ok: 0, needsAction: 0, unreadable: 0 });
   });
   test("pc mode returns only pcScene scenes", () => {
     const r = E.buildReport({ ...base(), mode: "pc", answers: {} }, stubScenes, B, TODAY, questions);

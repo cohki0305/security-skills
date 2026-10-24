@@ -32,7 +32,9 @@
   .nav [aria-current] { font-weight: 700; border-bottom: 2px solid var(--accent); }
   .note { font-size: .9rem; color: var(--muted); background: var(--accent-soft); padding: 10px 14px; border-radius: 6px; }
   .level { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
-  .level .grade { font-size: 2.6rem; font-weight: 700; color: var(--warn); line-height: 1; }
+  .level .grade { font-size: 2.6rem; font-weight: 700; color: var(--accent); line-height: 1; }
+  .level .grade.g-A { color: var(--ok); } .level .grade.g-B { color: var(--accent); }
+  .level .grade.g-C { color: var(--warn); } .level .grade.g-D, .level .grade.g-E { color: var(--bad); }
   .level p { flex: 1 1 260px; }
   .level small { color: var(--muted); display: block; font-size: .8rem; }
   .pill { display: inline-block; font-size: .8rem; font-weight: 700; padding: 1px 10px; border-radius: 999px; white-space: nowrap; }
@@ -66,11 +68,21 @@
 <script src="engine.js"></script>
 <script src="scenes.js"></script>
 <script src="questions.js"></script>
+<script src="pcs.js"></script>
 <script src="data.js"></script>
 <script>
 (function () {
-  var d = window.SC_DATA, E = window.SC_ENGINE;
-  document.getElementById("app").innerHTML = E.renderPcs(d, { baseline: window.SC_BASELINE, today: d.createdAt, answers: d.answers || {} });
+  var app = document.getElementById("app");
+  try {
+    var E = window.SC_ENGINE, d = window.SC_DATA;
+    if (!E || !d || typeof d !== "object") throw new Error("data");
+    // 社員の結果ファイル（pcs.js。なくてもよい）を 1 件ずつ読んで足す。読めないものは件数として数える
+    E.mergePcs(d, window.SC_PCS);
+    var qs = (window.SC_QUESTIONS && window.SC_QUESTIONS.questions) || [];
+    app.innerHTML = E.renderPcs(d, { baseline: window.SC_BASELINE, today: d.createdAt, answers: d.answers || {}, mode: d.mode });
+  } catch (e) {
+    app.innerHTML = '<div class="paper"><h2>レポートを表示できませんでした</h2><p>診断のデータが見つからないか、壊れています。同じフォルダのファイルを動かしたり消したりしていないか確かめて、診断をやり直してください。</p></div>';
+  }
 })();
 </script>
 </body>

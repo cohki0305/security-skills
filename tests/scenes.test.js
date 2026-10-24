@@ -218,7 +218,8 @@ describe("場面の判定", () => {
     const d = company({ backup_exists: "yes" }, [okPc()]);
     d.role = "manager";
     const out = run("ransomware", d);
-    expect(out.status).toBe("ok");
+    // 保存先を聞いていないので、場面は ok にならない（下の gate のテスト）。ok の文言だけを確かめる
+    expect(out.status).toBe("unknown");
     for (const role of ["manager", "admin"]) {
       const t = byId.ransomware.text[role].ok(out.facts);
       expect(t, role).toContain("バックアップは取っています");
@@ -230,7 +231,7 @@ describe("場面の判定", () => {
 
   test("ok の文言：2 段階認証は全員オンと聞いたときだけ「全員」と書く", () => {
     const only = run("email_takeover", company({ mfa_enabled: "yes" }));
-    expect(only.status).toBe("ok");
+    expect(only.status).toBe("unknown");
     expect(byId.email_takeover.text.manager.ok(only.facts)).not.toMatch(/全員が 2 段階認証|全員がスマホ/);
     const all = run("email_takeover", company({ mfa_enabled: "yes", mfa_coverage: "all" }));
     expect(byId.email_takeover.text.admin.ok(all.facts)).toContain("全員が 2 段階認証");
@@ -238,7 +239,7 @@ describe("場面の判定", () => {
 
   test("ok の文言：退職者の件数を聞いていなければ「残っていません」と書かない", () => {
     const out = run("departed_accounts", company({ departed_accounts_process: "yes" }));
-    expect(out.status).toBe("ok");
+    expect(out.status).toBe("unknown");
     const t = byId.departed_accounts.text.manager.ok(out.facts);
     expect(t).not.toContain("残っていません");
     expect(t).toContain("担当者に数えてもらって");
@@ -246,7 +247,7 @@ describe("場面の判定", () => {
 
   test("ok の文言：テレワークありで VPN を聞いていなければ、つなぎ方を断定しない", () => {
     const out = run("remote_intrusion", company({ telework: "yes" }, [okPc()]));
-    expect(out.status).toBe("ok");
+    expect(out.status).toBe("unknown");
     const t = byId.remote_intrusion.text.manager.ok(out.facts);
     expect(t).not.toContain("つなぐ使い方はしていません");
     expect(t).toContain("担当者に確かめて");
@@ -268,7 +269,7 @@ describe("場面の判定", () => {
 
   test("ok の文言：戻せることを試してあるなら、戻せるかを担当者に聞かせない", () => {
     const out = run("ransomware", company({ backup_exists: "yes", backup_restore_tested: "yes" }, [okPc()]));
-    expect(out.status).toBe("ok");
+    expect(out.status).toBe("unknown");
     const t = byId.ransomware.text.admin.ok(out.facts);
     expect(t).toContain("戻せることも試してあります");
     expect(t).not.toContain("実際に戻せるか");

@@ -5,6 +5,7 @@
   [string]$Out,
   [string]$Data,
   [string]$OutDir,
+  [string]$PcsDir,
   [string]$DocsRoot,
   [switch]$NoOpen
 )
@@ -85,9 +86,24 @@ switch ($Command) {
     Write-Utf8 (Join-Path $dest "questions.js") ("window.SC_QUESTIONS = JSON.parse(" + (ConvertTo-JsLiteral $q) + ");`n")
     $d = [IO.File]::ReadAllText((Resolve-Full $Data), [Text.Encoding]::UTF8).Trim()
     $null = ConvertFrom-Json -InputObject $d
+    # Employee result files: one JS string literal per *.json file, never parsed or run here. The page parses each one
+    # inside its own try, so a broken or hostile file only counts as "unreadable". Always rewritten (no stale results).
+    $items = New-Object System.Collections.ArrayList
+    if ($PcsDir) {
+      $pd = Resolve-Full $PcsDir
+      if (-not (Test-Path -LiteralPath $pd -PathType Container)) { throw "pcs folder not found" }
+      foreach ($file in @(Get-ChildItem -LiteralPath $pd -Filter "*.json" -File | Sort-Object Name)) {
+        $body = "too large"
+        if ($file.Length -le 1048576) {
+          try { $body = [IO.File]::ReadAllText($file.FullName, [Text.Encoding]::UTF8).Trim() } catch { $body = "unreadable" }
+        }
+        [void]$items.Add((ConvertTo-JsLiteral $body))
+      }
+    }
+    Write-Utf8 (Join-Path $dest "pcs.js") ("window.SC_PCS = [" + ($items -join ",`n") + "];`n")
     Write-Utf8 (Join-Path $dest "data.js") ("window.SC_DATA = JSON.parse(" + (ConvertTo-JsLiteral $d) + ");`n")
     if (-not $NoOpen) { Start-Process -FilePath (Join-Path $dest "report.html") }
     Write-Output (ConvertTo-Json -InputObject ([ordered]@{ report = (Join-Path $dest "report.html") }) -Compress)
   }
-  default { throw "usage: run.ps1 paths | check -Label <name> -Checks <ids> -Out <file> | report -Data <diagnosis.json> -OutDir <folder> [-NoOpen]" }
+  default { throw "usage: run.ps1 paths | check -Label <name> -Checks <ids> -Out <file> | report -Data <diagnosis.json> -OutDir <folder> [-PcsDir <folder>] [-NoOpen]" }
 }

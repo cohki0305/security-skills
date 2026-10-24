@@ -59,3 +59,41 @@ function Convert-BitLockerState($v) {
     default { return $null }
   }
 }
+
+# Screen lock from the power plan: the PC locks when it goes to sleep (STANDBYIDLE) and asks for the sign-in on wake (CONSOLELOCK).
+# Turning the display off does not lock anything, so it is not used. $Plans: items with Idle (seconds, 0 = never, $null = unreadable) and Lock (0/1/$null).
+# Takes the worst case of all readable plans (AC and battery): the longest wait, and the password only if every plan asks for it.
+# Returns $null when a plan never sleeps (nothing locks) or nothing was readable.
+function Get-SleepLock($Plans) {
+  $max = 0
+  $allLock = $true
+  $n = 0
+  foreach ($p in @($Plans)) {
+    if ($null -eq $p.Idle) { continue }
+    if ([int64]$p.Idle -le 0) { return $null }
+    $n++
+    if ([int64]$p.Idle -gt $max) { $max = [int64]$p.Idle }
+    if ($p.Lock -ne 1) { $allLock = $false }
+  }
+  if ($n -eq 0) { return $null }
+  return [pscustomobject]@{ Minutes = [Math]::Ceiling($max / 60.0); Password = $allLock }
+}
+
+# $Cands: items with Minutes and Password. $PowerReadable: whether the power plan could be read at all.
+# Candidates that ask for the password win (shortest wait); otherwise the lock does not need a password. Nothing locks -> false, unless the power plan was unreadable -> unknown (null).
+function Resolve-ScreenLock($Cands, [bool]$PowerReadable) {
+  $c = @($Cands | Where-Object { $null -ne $_ })
+  $withPw = @($c | Where-Object { $_.Password })
+  $facts = [ordered]@{}
+  if ($withPw.Count -gt 0) {
+    $facts["timeoutMinutes"] = [int](($withPw | Sort-Object Minutes)[0].Minutes)
+    $facts["requiresPassword"] = $true
+  } elseif ($c.Count -gt 0) {
+    $facts["timeoutMinutes"] = [int](($c | Sort-Object Minutes)[0].Minutes)
+    $facts["requiresPassword"] = $false
+  } else {
+    $facts["timeoutMinutes"] = $null
+    $facts["requiresPassword"] = $(if ($PowerReadable) { $false } else { $null })
+  }
+  return $facts
+}

@@ -63,18 +63,31 @@ const SC_SCENES = (function () {
     const c = Object.assign({}, ctx, extra || {});
     const target = pcs || ctx.pcs || [];
     const agg = engine.aggregatePcs(target, checkId, c);
-    const reasons = {};
+    const reasons = Object.create(null);
     target.forEach((pc) => {
-      const res = engine.evaluateCheck(checkId, pc && pc.checks ? pc.checks[checkId] : undefined, Object.assign({}, c, { os: pc && pc.os, osVersion: pc && pc.osVersion }));
+      const ok = pc !== null && typeof pc === "object";
+      const checks = ok && pc.checks !== null && typeof pc.checks === "object" ? pc.checks : null;
+      const res = engine.evaluateCheck(checkId, checks ? checks[checkId] : undefined, Object.assign({}, c, { os: ok ? pc.os : undefined, osVersion: ok ? pc.osVersion : undefined }));
       if (res.status !== "ok" && res.reason) reasons[res.reason] = (reasons[res.reason] || 0) + 1;
     });
-    return { key, kind: "pc", status: agg.status, counts: agg.counts, checked: agg.checked, reasons };
+    return { key, kind: "pc", status: agg.status, counts: agg.counts, checked: agg.checked, reasons, pcMode: c.mode === "pc" };
   }
 
-  function result(engine, signals) {
+  // gates: 重大な場面で、決め手になる深掘りの質問が聞かれていないときの印 [{ key, miss }]。
+  // 聞かれていない（経営者だけの回答など）のに、親の「はい」だけで「守れている」にしないため、ok のときだけ unknown に下げる
+  function result(engine, signals, gates) {
     const sigs = signals.filter(Boolean);
-    return { status: sigs.length ? engine.combine(sigs.map((s) => s.status)) : "unknown", facts: { signals: sigs } };
+    let status = sigs.length ? engine.combine(sigs.map((s) => s.status)) : "unknown";
+    if (status === "ok") {
+      const missing = (gates || []).filter((g) => g && g.miss);
+      if (missing.length) {
+        status = "unknown";
+        missing.forEach((g) => sigs.push({ key: g.key, kind: "answer", status: "unknown", unasked: true }));
+      }
+    }
+    return { status, facts: { signals: sigs } };
   }
+  const asked = (answers, id) => (answers || {})[id] !== undefined;
 
   function allowedCloud(answers) {
     const a = answers || {};
@@ -100,8 +113,8 @@ const SC_SCENES = (function () {
     const out = [];
     (pcs || []).forEach((pc) => {
       const r = pc && pc.checks && pc.checks.cloud_sync;
-      if (!r || r.unavailable != null) return;
-      ((r.facts && r.facts.products) || []).forEach((p) => {
+      if (!r || typeof r !== "object" || r.unavailable != null) return;
+      (r.facts && Array.isArray(r.facts.products) ? r.facts.products : []).forEach((p) => {
         if (ok.indexOf(String(p).toLowerCase()) < 0 && out.indexOf(p) < 0) out.push(p);
       });
     });
@@ -138,12 +151,14 @@ const SC_SCENES = (function () {
     if (!s.checked) return "社員の PC の結果がまだないため、" + what + "を確認できていません。";
     const n = s.counts.unknown;
     for (const r of Object.keys(REASON_TEXT)) {
-      if (reasonN(s, r) === n) return of(s, n) + "は、" + REASON_TEXT[r] + what + "を確認できませんでした。";
+      if (reasonN(s, r) === n) return of(s, n) + "は、" + REASON_TEXT[r] + "、" + what + "を確認できませんでした。";
     }
     return of(s, n) + "は、" + what + "を確認できませんでした。";
   }
   function pcNextUnknown(s) {
     if (!s.checked) return "社員に「自分の PC の診断」を回してもらう";
+    // 自分の PC の診断（本人が見るページ）では、担当者向けの行動を出さない
+    if (s.pcMode) return "担当者に伝える";
     if (reasonN(s, "needs_admin") > 0) return "管理者のアカウントで、確認できなかった PC を見てもらう";
     return "確認できなかった PC で、もう一度診断を動かしてもらう";
   }
@@ -189,6 +204,7 @@ const SC_SCENES = (function () {
   }
 
   const ASK = "業者や担当者に聞くことリストで確かめる";
+  const CONFIRM = "担当者に、詳しい質問に答えてもらって確かめる";
 
   // ---- 場面 ----
 
@@ -224,9 +240,10 @@ const SC_SCENES = (function () {
         answerSig(ctx, engine, "backup_restore_tested", { yes: "ok", no: "warn" }, yes),
         pcSig(ctx, engine, "antivirus", "antivirus"),
         pcSig(ctx, engine, "os_update", "os_update"),
-      ]);
+      ], [{ key: "confirm_backup", miss: list((ctx.answers || {}).backup_exists).indexOf("yes") >= 0 && !asked(ctx.answers, "backup_location") }]);
     },
     say: {
+      confirm_backup: { unknown: () => "バックアップは取っているとのことですが、別の場所に置いているか、戻せるかは、まだ確かめていません。" },
       backup_exists: {
         bad: () => "大事なデータのバックアップを取っていません。",
         unknown: () => "バックアップを取っているか、把握している人がいませんでした。",
@@ -255,6 +272,7 @@ const SC_SCENES = (function () {
       },
     },
     hint: {
+      confirm_backup: "バックアップの保存先と、戻せるかを担当者に確かめてもらってください。",
       backup_exists: "共有フォルダと会計データから始め、社外のクラウドか、ふだんはつないでいない機器に保存してください。",
       backup_location: "社外のクラウドか、ふだんはつないでいない機器にもう 1 つ写しを置けるか、業者に相談してください。",
       backup_generations: "数日分以上を残す設定にできるか、バックアップの設定画面か業者に確かめてください。",
@@ -263,6 +281,7 @@ const SC_SCENES = (function () {
       os_update: "PC ごとの結果の一覧で、該当する PC を確かめてください。",
     },
     next: {
+      confirm_backup: { unknown: CONFIRM },
       backup_exists: { bad: "大事なデータのバックアップを取り始める", unknown: ASK },
       backup_location: { bad: "社外か別の場所にもう 1 つ保存する", unknown: ASK },
       backup_generations: { warn: "数日分さかのぼれる形で残す", unknown: ASK },
@@ -316,9 +335,10 @@ const SC_SCENES = (function () {
         answerSig(ctx, engine, "departed_accounts_days", { within_week: "ok", after_week: "bad" }, { departed_accounts_process: ["yes"] }),
         answerSig(ctx, engine, "shared_accounts", { none: "ok", some: "warn" }),
         answerSig(ctx, engine, "saas_list", { yes: "ok", no: "warn" }),
-      ]);
+      ], [{ key: "confirm_departed", miss: !asked(ctx.answers, "departed_accounts_count") }]);
     },
     say: {
+      confirm_departed: { unknown: () => "辞めた人のアカウントが残っていないかは、まだ数えて確かめていません。" },
       departed_accounts_count: {
         bad: () => "辞めた人のアカウントで、止めていないものが残っています。",
         unknown: () => "辞めた人のアカウントが残っていないか、把握している人がいませんでした。",
@@ -341,6 +361,7 @@ const SC_SCENES = (function () {
       },
     },
     hint: {
+      confirm_departed: "メールやファイル共有の管理画面で、辞めた人のアカウントが残っていないか数えてもらってください。",
       departed_accounts_count: "メールやファイル共有の管理画面で、最後のログインが古いアカウントから見ていくと見つけやすいです。",
       departed_accounts_process: "退職の手続きの書類に「アカウントを止める」を入れ、誰が止めるかを決めてください。",
       departed_accounts_days: "退職の手続きの書類に「退職日にアカウントを止める」を入れてください。",
@@ -348,6 +369,7 @@ const SC_SCENES = (function () {
       saas_list: "サービス名と管理者を並べた表を 1 つ作り、退職のときはそれを見て止めてください。",
     },
     next: {
+      confirm_departed: { unknown: CONFIRM },
       departed_accounts_count: { bad: "今日止める。退職日に止める手順を決める", unknown: "管理画面で、辞めた人のアカウントが残っていないか数える" },
       departed_accounts_process: { bad: "退職日に止める手順を決める", unknown: ASK },
       departed_accounts_days: { bad: "退職日に止める流れにする", unknown: ASK },
@@ -398,9 +420,10 @@ const SC_SCENES = (function () {
         answerSig(ctx, engine, "mfa_coverage", { all: "ok", some: "warn" }, { mfa_enabled: ["yes"] }),
         answerSig(ctx, engine, "saas_admin_known", { yes: "ok", no: "warn" }),
         answerSig(ctx, engine, "email_misdelivery", { yes: "ok", no: "warn" }),
-      ]);
+      ], [{ key: "confirm_mfa", miss: list((ctx.answers || {}).mfa_enabled).indexOf("yes") >= 0 && !asked(ctx.answers, "mfa_coverage") }]);
     },
     say: {
+      confirm_mfa: { unknown: () => "メールの 2 段階認証（スマホでの確認）は使っているとのことですが、全員がオンかは、まだ確かめていません。" },
       mfa_enabled: {
         bad: () => "メールにパスワードだけで入れるため、パスワードが漏れるとそのまま乗っ取られます。",
         unknown: () => "メールの 2 段階認証（スマホでの確認）を使っているか、把握している人がいませんでした。",
@@ -419,12 +442,14 @@ const SC_SCENES = (function () {
       },
     },
     hint: {
+      confirm_mfa: "メールの管理画面で、2 段階認証がオンでないアカウントがないか確かめてもらってください。",
       mfa_enabled: "メールの管理画面で 2 段階認証を全員に求める設定にしてください。",
       mfa_coverage: "メールの管理画面で、2 段階認証がオンでないアカウントを一覧で確かめられます。",
       saas_admin_known: "サービスごとに管理者を 2 人ずつ決めておくと、1 人が不在でも止められます。",
       email_misdelivery: "社外あての送信に確認画面を出す設定や、送信の取り消しができる設定を入れられるか確かめてください。",
     },
     next: {
+      confirm_mfa: { unknown: CONFIRM },
       mfa_enabled: { bad: "全員の 2 段階認証をオンにする", unknown: "管理画面で 2 段階認証の状態を確かめる" },
       mfa_coverage: { warn: "残りの人の 2 段階認証をオンにする", unknown: "管理画面で 2 段階認証の状態を確かめる" },
       saas_admin_known: { warn: "サービスごとに管理する人を決める", unknown: ASK },
@@ -494,9 +519,10 @@ const SC_SCENES = (function () {
         usesVpn && vpnPcs.length > 0 ? pcSig(ctx, engine, "vpn_client", "vpn_client", null, vpnPcs) : null,
         pcSig(ctx, engine, "remote_access", "remote_access"),
         pcSig(ctx, engine, "firewall", "firewall"),
-      ]);
+      ], [{ key: "confirm_remote", miss: list(answers.telework).indexOf("yes") >= 0 && !asked(answers, "vpn_used") }]);
     },
     say: {
+      confirm_remote: { unknown: () => "社外から社内のシステムを使っているとのことですが、つなぎ方（VPN など）が安全な状態かは、まだ確かめていません。" },
       telework: { unknown: () => "社外から社内のシステムを使っているか、把握している人がいませんでした。" },
       vpn_used: { unknown: () => "社外から社内につなぐのに VPN を使っているか、把握している人がいませんでした。" },
       vpn_updated: {
@@ -524,6 +550,7 @@ const SC_SCENES = (function () {
       },
     },
     hint: {
+      confirm_remote: "社外からのつなぎ方（VPN の有無、外から PC を操作する仕組み）を担当者に確かめてもらってください。",
       vpn_updated: "機器のメーカー名と型番を控え、最新の更新が当たっているかを業者に確かめてください。",
       remote_desktop: "VPN を通したときだけ使えるようにし、2 段階認証を付けられるか業者に相談してください。",
       vpn_client: "PC ごとの結果の一覧で、該当する PC を確かめてください。",
@@ -531,6 +558,7 @@ const SC_SCENES = (function () {
       firewall: "PC ごとの結果の一覧で、該当する PC を確かめてください。",
     },
     next: {
+      confirm_remote: { unknown: CONFIRM },
       telework: { unknown: ASK },
       vpn_used: { unknown: ASK },
       vpn_updated: { bad: "VPN の機器が最新か、今週中に業者に確かめる", unknown: "VPN の機器が最新か業者に確かめる" },
@@ -795,8 +823,12 @@ const SC_SCENES = (function () {
     answerIds: ["wifi_guest_separated", "wifi_password_changed", "nas_exists", "nas_updated", "mail_service", "cloud_extra", "cloud_extra_which"],
     evaluate(d, ctx, engine) {
       const allowed = allowedCloud(ctx.answers);
-      const cloud = pcSig(ctx, engine, "cloud_sync", "cloud_sync", { allowedCloud: allowed });
-      cloud.extra = unapprovedProducts(ctx.pcs, allowed);
+      // メール・ファイル共有の質問が聞かれていない（経営者だけの回答など）ときは、方針を「決める」と促さず、この項目を数えない
+      let cloud = null;
+      if (asked(ctx.answers, "mail_service")) {
+        cloud = pcSig(ctx, engine, "cloud_sync", "cloud_sync", { allowedCloud: allowed });
+        cloud.extra = unapprovedProducts(ctx.pcs, allowed);
+      }
       return result(engine, [
         answerSig(ctx, engine, "wifi_guest_separated", { separated: "ok", same: "warn" }),
         answerSig(ctx, engine, "wifi_password_changed", { yes: "ok", no: "warn" }),
