@@ -37,6 +37,14 @@ function Get-Roots() {
   return @{ outputRoot = $root; employeeResults = $emp }
 }
 
+# Output guard: -Out / -OutDir must resolve inside the output root of "paths", so the auto-approved runner never writes elsewhere.
+function Assert-InsideRoot([string]$p, [string]$name) {
+  $root = [IO.Path]::GetFullPath((Get-Roots).outputRoot).TrimEnd('\') + '\'
+  $full = [IO.Path]::GetFullPath((Resolve-Full $p))
+  if (-not $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) -or $full.Length -le $root.Length) { throw "$name must be inside the output folder" }
+  return $full
+}
+
 switch ($Command) {
   "paths" {
     $r = Get-Roots
@@ -46,6 +54,8 @@ switch ($Command) {
   "check" {
     if (-not $Label) { throw "-Label is required" }
     if (-not $Out) { throw "-Out is required" }
+    $outFull = Assert-InsideRoot $Out "-Out"
+    if (-not $outFull.EndsWith(".json", [StringComparison]::OrdinalIgnoreCase)) { throw "-Out must end with .json" }
     $ids = $ALL
     if ($Checks) { $ids = @($Checks -split "[,\s]+" | Where-Object { $_ }) }
     $parts = New-Object System.Collections.ArrayList
@@ -71,13 +81,13 @@ switch ($Command) {
     $text = '{"version":1,"label":' + (ConvertTo-Json -InputObject $Label -Compress) + ',"checkedAt":"' + $today + '","os":"windows","osVersion":' +
       (ConvertTo-Json -InputObject $osVersion -Compress) + ',"checks":{' + ($parts -join ",") + "}}"
     $null = ConvertFrom-Json -InputObject $text
-    Write-Utf8 (Resolve-Full $Out) $text
+    Write-Utf8 $outFull $text
   }
   "report" {
     if (-not $Data) { throw "-Data is required" }
     if (-not $OutDir) { throw "-OutDir is required" }
     $skill = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-    $dest = Resolve-Full $OutDir
+    $dest = Assert-InsideRoot $OutDir "-OutDir"
     if (-not (Test-Path -LiteralPath $dest)) { New-Item -ItemType Directory -Path $dest -Force | Out-Null }
     foreach ($f in @("baseline.js", "engine.js", "scenes.js", "report.html", "asklist.html", "pcs.html")) {
       Copy-Item -LiteralPath (Join-Path $skill ("report\" + $f)) -Destination (Join-Path $dest $f) -Force

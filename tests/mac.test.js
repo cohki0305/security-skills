@@ -13,15 +13,17 @@ const SHIMS = join(ROOT, "tests/mac-shims");
 const IDS = ["antivirus", "disk_encryption", "os_update", "os_support", "firewall", "screen_lock", "local_admin", "remote_access", "vpn_client", "cloud_sync", "browser"];
 const FIXTURE = join(ROOT, "tests/fixtures/diagnosis-company.json");
 
-let tmp, apps, home;
+// tmp is the output root (<docs>/セキュリティ診断): the runner only writes inside it (SC_DOCS_ROOT = docs)
+let docs, tmp, apps, home;
 beforeAll(() => {
-  tmp = mkdtempSync(join(tmpdir(), "sc-mac-test-"));
+  docs = mkdtempSync(join(tmpdir(), "sc-mac-test-"));
+  tmp = join(docs, "セキュリティ診断");
   apps = join(tmp, "Applications");
   home = join(tmp, "home 太郎");
   mkdirSync(apps, { recursive: true });
   mkdirSync(home, { recursive: true });
 });
-afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+afterAll(() => rmSync(docs, { recursive: true, force: true }));
 
 function env(extra = {}) {
   return {
@@ -32,6 +34,7 @@ function env(extra = {}) {
     SC_SOCKETFILTERFW: join(SHIMS, "socketfilterfw"),
     SC_SAFARI_APP: join(tmp, "no-safari.app"),
     SC_XPROTECT_INFO: join(tmp, "no-xprotect-info.plist"),
+    SC_DOCS_ROOT: docs,
     ...extra,
   };
 }
@@ -414,5 +417,27 @@ describe("bash 3.2 compatibility", () => {
     // comments may mention them; code lines must not
     const code = r.stdout.split("\n").filter((l) => l && !/^[^:]+:\d+:\s*#/.test(l) && !/#.*(sudo|softwareupdate)/.test(l));
     expect(code).toEqual([]);
+  });
+});
+
+describe("run.sh writes only inside the output root", () => {
+  test("--out / --outdir outside the root, with .., relative, or not .json are refused and nothing is written", () => {
+    const outside = join(docs, "outside.json");
+    const bad = [
+      ["check", "--label", "x", "--checks", "firewall", "--out", outside],
+      ["check", "--label", "x", "--checks", "firewall", "--out", join(tmp, "..", "escape.json")],
+      ["check", "--label", "x", "--checks", "firewall", "--out", "rel.json"],
+      ["check", "--label", "x", "--checks", "firewall", "--out", join(tmp, "a.txt")],
+      ["check", "--label", "x", "--checks", "firewall", "--out", tmp],
+      ["report", "--data", FIXTURE, "--outdir", join(docs, "elsewhere"), "--no-open"],
+      ["report", "--data", FIXTURE, "--outdir", join(tmp, "sub", "..", "..", "up"), "--no-open"],
+    ];
+    for (const args of bad) expect(run(join(MAC, "run.sh"), args).code, args.join(" ")).not.toBe(0);
+    expect(existsSync(outside)).toBe(false);
+    expect(existsSync(join(docs, "escape.json"))).toBe(false);
+    expect(existsSync(join(tmp, "a.txt"))).toBe(false);
+    expect(existsSync(join(docs, "elsewhere"))).toBe(false);
+    expect(existsSync(join(docs, "up"))).toBe(false);
+    expect(run(join(MAC, "run.sh"), ["check", "--label", "x", "--checks", "firewall", "--out", join(tmp, "社員PC結果", "ok.json")]).code).toBe(0);
   });
 });

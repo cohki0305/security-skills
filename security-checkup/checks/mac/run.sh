@@ -92,6 +92,23 @@ roots() {
   EMP_RESULTS="$OUTPUT_ROOT/社員PC結果"
 }
 
+# Output guard: --out / --outdir must be absolute paths inside the output root of "paths" (no ".." parts),
+# so the auto-approved runner can never write elsewhere.
+inside_root() {
+  roots
+  case "$1" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  case "/$1/" in
+    */../*|*/./*) return 1 ;;
+  esac
+  case "$1" in
+    "$OUTPUT_ROOT"/?*) return 0 ;;
+  esac
+  return 1
+}
+
 cmd_paths() {
   roots
   mkdir -p "$OUTPUT_ROOT" "$EMP_RESULTS" || die "cannot create folders"
@@ -110,6 +127,8 @@ cmd_check() {
   done
   [ -n "$label" ] || die "--label is required"
   [ -n "$out" ] || die "--out is required"
+  inside_root "$out" || die "--out must be inside the output folder"
+  case "$out" in *.json) ;; *) die "--out must end with .json" ;; esac
   if [ -z "$checks" ]; then checks="$ALL"; fi
   checks=$(printf '%s' "$checks" | tr ',' ' ')
   set -f
@@ -153,6 +172,7 @@ cmd_report() {
   done
   [ -n "$data" ] || die "--data is required"
   [ -n "$outdir" ] || die "--outdir is required"
+  inside_root "$outdir" || die "--outdir must be inside the output folder"
   [ -f "$data" ] || die "data file not found"
   if [ -n "$pcsdir" ]; then [ -d "$pcsdir" ] || die "pcs folder not found"; fi
   d=$(cat "$data")
