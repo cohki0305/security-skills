@@ -202,7 +202,11 @@ const SC_SCENES = (function () {
     if (okSig(f, "backup_generations")) said.push("何日か前の分も残っています");
     if (okSig(f, "backup_restore_tested")) said.push("戻せることも試してあります");
     const head = "バックアップは取っています" + (said.length ? "。" + said.join("。") : "") + "。";
-    return head + "保存先や、実際に戻せるかの確認は、担当者に聞いてください。";
+    const ask = [];
+    if (!okSig(f, "backup_location")) ask.push("保存先");
+    if (!okSig(f, "backup_generations")) ask.push("何日前までさかのぼれるか");
+    if (!okSig(f, "backup_restore_tested")) ask.push("実際に戻せるか");
+    return head + ask.join("、") + "は、担当者に確かめてください。";
   }
 
   const ransomware = makeScene({
@@ -459,7 +463,8 @@ const SC_SCENES = (function () {
     else if (val("telework").indexOf("yes") < 0) said.push("社外から社内につなぐ使い方はしていません。");
     else if (!hasSig(f, "vpn_used")) said.push("社外から社内へのつなぎ方は、担当者に確かめてください。");
     else if (okSig(f, "vpn_updated")) said.push("社外からつなぐための機器（VPN）は、最新の状態か確かめてあります。");
-    else said.push("社外からつなぐのに VPN は使っていません。");
+    else if (val("vpn_used").indexOf("no") >= 0) said.push("社外からつなぐのに VPN は使っていません。");
+    else said.push("社外からつなぐための機器（VPN）が最新の状態かは、担当者に確かめてください。");
     if (okSig(f, "remote_desktop")) said.push("社内の PC を外から直接操作する仕組みも使っていません。");
     said.push("確認した PC にも、外から入られる設定は見つかりませんでした。");
     return said.join("");

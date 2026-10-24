@@ -254,6 +254,27 @@ describe("場面の判定", () => {
     expect(byId.remote_intrusion.text.manager.ok(none.facts)).toContain("つなぐ使い方はしていません");
   });
 
+  test("ok の文言：VPN ありで更新の確認が未回答なら「VPN は使っていません」と書かない", () => {
+    const out = run("remote_intrusion", company({ telework: "yes", vpn_used: "yes", remote_desktop: "no" }, [okPc()]));
+    expect(out.status).toBe("ok");
+    for (const role of ["manager", "admin"]) {
+      const t = byId.remote_intrusion.text[role].ok(out.facts);
+      expect(t, role).not.toContain("VPN は使っていません");
+      expect(t, role).toContain("最新の状態かは、担当者に確かめて");
+    }
+    const noVpn = run("remote_intrusion", company({ telework: "yes", vpn_used: "no", remote_desktop: "no" }, [okPc()]));
+    expect(byId.remote_intrusion.text.manager.ok(noVpn.facts)).toContain("VPN は使っていません");
+  });
+
+  test("ok の文言：戻せることを試してあるなら、戻せるかを担当者に聞かせない", () => {
+    const out = run("ransomware", company({ backup_exists: "yes", backup_restore_tested: "yes" }, [okPc()]));
+    expect(out.status).toBe("ok");
+    const t = byId.ransomware.text.admin.ok(out.facts);
+    expect(t).toContain("戻せることも試してあります");
+    expect(t).not.toContain("実際に戻せるか");
+    expect(t).toContain("保存先");
+  });
+
   test("vpn_updated が「確かめていない」なら bad（裁定 9）", () => {
     const out = run("remote_intrusion", company({ telework: "yes", vpn_used: "yes", vpn_updated: "no", remote_desktop: "no" }, [okPc()]));
     expect(out.status).toBe("bad");
