@@ -71,6 +71,21 @@ valid_part() {
   printf '%s' "$text" | json_balanced
 }
 
+# JSON text -> a JavaScript string literal for JSON.parse("..."): escapes \ " < (as \u003c), tab, CR, newline, U+2028, U+2029.
+# The data is never placed into the page as a JS expression.
+js_literal() {
+  local tab cr
+  tab=$(printf '\t')
+  cr=$(printf '\r')
+  printf '"'
+  printf '%s' "$1" | LC_ALL=C sed \
+    -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/</\\u003c/g' \
+    -e "s/$tab/\\\\t/g" -e "s/$cr/\\\\r/g" \
+    -e "s/$(printf '\342\200\250')/\\\\u2028/g" -e "s/$(printf '\342\200\251')/\\\\u2029/g" |
+    LC_ALL=C awk 'NR > 1 { printf "%s", "\\n" } { printf "%s", $0 }'
+  printf '"'
+}
+
 roots() {
   local docs="${SC_DOCS_ROOT:-$HOME/Documents}"
   OUTPUT_ROOT="$docs/セキュリティ診断"
@@ -84,7 +99,7 @@ cmd_paths() {
 }
 
 cmd_check() {
-  local label="" checks="" out="" id file raw rc json parts="" osv today text dir
+  local seen="|" label="" checks="" out="" id file raw rc json parts="" osv today text dir
   while [ $# -gt 0 ]; do
     case "$1" in
       --label) [ $# -ge 2 ] || usage; label="$2"; shift 2 ;;
@@ -97,7 +112,10 @@ cmd_check() {
   [ -n "$out" ] || die "--out is required"
   if [ -z "$checks" ]; then checks="$ALL"; fi
   checks=$(printf '%s' "$checks" | tr ',' ' ')
+  set -f
   for id in $checks; do
+    case "$seen" in *"|$id|"*) continue ;; esac
+    seen="$seen$id|"
     file="$PARTS/$id.sh"
     case "$id" in
       *[!a-z_]*) json='{"facts":{},"unavailable":"not_supported"}' ;;
@@ -112,6 +130,7 @@ cmd_check() {
     esac
     if [ -z "$parts" ]; then parts="\"$id\":$json"; else parts="$parts,\"$id\":$json"; fi
   done
+  set +f
   osv=$(sw_vers -productVersion 2>/dev/null)
   today=$(date +%Y-%m-%d)
   text="{\"version\":1,\"label\":$(json_str "$label"),\"checkedAt\":\"$today\",\"os\":\"mac\",\"osVersion\":$(json_str "$osv"),\"checks\":{$parts}}"
@@ -141,8 +160,8 @@ cmd_report() {
     cp -f "$SKILL/report/$f" "$outdir/$f" || die "cannot copy $f"
   done
   q=$(cat "$SKILL/questions/company.json")
-  printf 'window.SC_QUESTIONS = %s;\n' "$q" > "$outdir/questions.js"
-  printf 'window.SC_DATA = %s;\n' "$d" > "$outdir/data.js"
+  printf 'window.SC_QUESTIONS = JSON.parse(%s);\n' "$(js_literal "$q")" > "$outdir/questions.js"
+  printf 'window.SC_DATA = JSON.parse(%s);\n' "$(js_literal "$d")" > "$outdir/data.js"
   if [ "$noopen" -eq 0 ]; then open "$outdir/report.html" >/dev/null 2>&1; fi
   printf '{"report":%s}\n' "$(json_str "$outdir/report.html")"
 }

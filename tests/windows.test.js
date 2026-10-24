@@ -3,6 +3,8 @@ setDefaultTimeout(180000);
 import { existsSync, mkdirSync, readFileSync, readdirSync, cpSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
+import vm from "node:vm";
+import { writeFileSync } from "node:fs";
 
 const PS = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
 const HAS_PS = existsSync(PS);
@@ -122,11 +124,39 @@ d("windows checks", () => {
     const dir = join(tmpLin, "診断 レポート");
     expect(readdirSync(dir).sort()).toEqual(["asklist.html", "baseline.js", "data.js", "engine.js", "pcs.html", "questions.js", "report.html", "scenes.js"]);
     const data = readFileSync(join(dir, "data.js"), "utf8");
-    expect(data.startsWith("window.SC_DATA = ")).toBe(true);
-    expect(JSON.parse(data.replace(/^window\.SC_DATA = /, "").replace(/;\s*$/, "")).mode).toBe("company");
+    expect(data.startsWith('window.SC_DATA = JSON.parse("')).toBe(true);
+    const sandbox = { window: {} };
+    const ctx = vm.createContext(sandbox);
+    vm.runInContext(data, ctx);
+    vm.runInContext(readFileSync(join(dir, "questions.js"), "utf8"), ctx);
+    expect(sandbox.window.SC_DATA.mode).toBe("company");
+    expect(sandbox.window.SC_DATA).toEqual(JSON.parse(readFileSync(FIXTURE, "utf8")));
+    expect(Array.isArray(sandbox.window.SC_QUESTIONS.questions)).toBe(true);
     const q = readFileSync(join(dir, "questions.js"), "utf8");
-    expect(q.startsWith("window.SC_QUESTIONS = ")).toBe(true);
+    expect(q.startsWith("window.SC_QUESTIONS = JSON.parse(")).toBe(true);
     expect(readFileSync(join(dir, "engine.js"), "utf8")).toContain("SC_ENGINE");
+  });
+
+  test("report: data is only data (no code runs); non-JSON expressions are rejected", () => {
+    const evil = '{"a":"x\\"});globalThis.pwned=1;//","b":"</script><script>globalThis.pwned=2</script>","d":"raw \u2028 \u2029 chars"}';
+    writeFileSync(join(tmpLin, "evil.json"), evil, "utf8");
+    const outDir = tmpWin + "\\evil out";
+    const r = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "report", "-Data", tmpWin + "\\evil.json", "-OutDir", outDir, "-NoOpen"]);
+    expect(r.code).toBe(0);
+    const js = readFileSync(join(tmpLin, "evil out", "data.js"), "utf8");
+    expect(js).not.toContain("<");
+    expect(js).not.toContain("\u2028");
+    const sandbox = { window: {} };
+    const ctx = vm.createContext(sandbox);
+    vm.runInContext(js, ctx);
+    expect(sandbox.window.SC_DATA).toEqual(JSON.parse(evil));
+    expect(vm.runInContext("typeof pwned", ctx)).toBe("undefined");
+    for (const [i, bad] of ["1;globalThis.pwned=1", '"x"});alert(1)//'].entries()) {
+      writeFileSync(join(tmpLin, "expr" + i + ".json"), bad, "utf8");
+      const x = ps(["-File", skillWin + "\\checks\\windows\\run.ps1", "report", "-Data", tmpWin + "\\expr" + i + ".json", "-OutDir", tmpWin + "\\expr-out" + i, "-NoOpen"]);
+      expect(x.code).not.toBe(0);
+      expect(existsSync(join(tmpLin, "expr-out" + i, "data.js"))).toBe(false);
+    }
   });
 
   test("paths prints JSON with the output and employee folders", () => {

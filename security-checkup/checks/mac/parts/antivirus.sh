@@ -18,10 +18,16 @@ for app in "$SC_APPS_DIR"/*.app "$SC_HOME/Applications"/*.app; do
 done
 updated=""
 if [ "$third" -eq 0 ]; then
+  # Newer of: install history (XProtect* entries) and the modification day of XProtect.bundle's Info.plist.
+  # From macOS 15 on, XProtect updates may no longer appear in the install history, so the bundle date is read too.
   sc_capture system_profiler SPInstallHistoryDataType -json
+  hist=""
   if [ "$CAP_RC" -eq 0 ]; then
-    updated=$(printf '%s\n' "$CAP_OUT" | sc_history_entries | sc_history_latest xprotect)
+    hist=$(printf '%s\n' "$CAP_OUT" | sc_history_entries | sc_history_latest xprotect)
   fi
+  bundle=$(sc_file_day "$SC_XPROTECT_INFO")
+  updated="$hist"
+  if [ -n "$bundle" ] && { [ -z "$updated" ] || [ "$bundle" \> "$updated" ]; }; then updated="$bundle"; fi
 fi
 sc_emit "{\"products\":[$products],\"definitionsUpdatedAt\":$(sc_json_str_or_null "$updated"),\"lastScanAt\":null}" ""
 exit 0

@@ -1,10 +1,11 @@
 #!/bin/bash
 # Shared helpers for the Mac parts (sourced). Bash 3.2 compatible. Read-only: no sudo, no writes, no network.
-# Test overrides: SC_HOME (home folder), SC_APPS_DIR (/Applications), SC_SOCKETFILTERFW, SC_SAFARI_APP.
+# Test overrides: SC_HOME (home folder), SC_APPS_DIR (/Applications), SC_SOCKETFILTERFW, SC_SAFARI_APP, SC_XPROTECT_INFO.
 
 SC_HOME="${SC_HOME:-$HOME}"
 SC_APPS_DIR="${SC_APPS_DIR:-/Applications}"
 SC_SOCKETFILTERFW="${SC_SOCKETFILTERFW:-/usr/libexec/ApplicationFirewall/socketfilterfw}"
+SC_XPROTECT_INFO="${SC_XPROTECT_INFO:-/Library/Apple/System/Library/CoreServices/XProtect.bundle/Contents/Info.plist}"
 SC_SAFARI_APP="${SC_SAFARI_APP:-/System/Cryptexes/App/System/Applications/Safari.app}"
 
 # JSON string with escaping (backslash, quote, control characters). Non-ASCII passes through as UTF-8.
@@ -91,6 +92,14 @@ sc_history_latest() {
     if [ -z "$best" ] || [ "$day" \> "$best" ]; then best="$day"; fi
   done
   printf '%s' "$best"
+}
+
+# Modification day (YYYY-MM-DD) of a file via BSD stat; empty when stat is not the BSD one, the file is missing or the output is not a date.
+sc_file_day() {
+  local d
+  [ -e "$1" ] || return 0
+  d=$(stat -f %Sm -t %Y-%m-%d "$1" 2>/dev/null | head -n 1)
+  sc_day "$d"
 }
 
 # Version of an app bundle (short version, then build version), or empty

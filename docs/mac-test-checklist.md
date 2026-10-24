@@ -59,7 +59,7 @@ cat ~/Desktop/mac-result.json
 | 外部から操作（remote_access） | `sshEnabled`（リモートログイン）と `screenSharingEnabled`（画面共有）が、共有の設定と同じか。`rdpEnabled` は Mac では常に `null` | 一般 → 共有 |
 | OS のバージョン（os_support） | `version` が、「このMacについて」の表示と同じか | 一般 → 情報 |
 | OS の更新（os_update） | `lastInstalledAt` が、最後に OS 更新を入れた日に近いか。`pendingCount` は `null`（ネットワークに出ないため） | 一般 → ソフトウェアアップデート → 更新履歴 |
-| ウイルス対策（antivirus） | `products` に XProtect（Apple 標準）と、入れている対策ソフトが出るか。対策ソフトが入っているときは `definitionsUpdatedAt` が `null`（判定は「わからない」になります） | アプリケーションフォルダ |
+| ウイルス対策（antivirus） | `products` に XProtect（Apple 標準）と、入れている対策ソフトが出るか。対策ソフトが入っているときは `definitionsUpdatedAt` が `null`（判定は「わからない」になります）。入っていないときの `definitionsUpdatedAt` は、システム情報アプリの「ソフトウェア → インストール」にある XProtect の最新の日付、または `system_profiler SPInstallHistoryDataType` の XProtect の日付と近いか、Finder の `/Library/Apple/System/Library/CoreServices/XProtect.bundle` の更新日と見比べる（新しい方が出ます） | アプリケーションフォルダ |
 | VPN（vpn_client） | 入れている VPN アプリが出るか。入れていなければ空 | アプリケーションフォルダ |
 | クラウド同期（cloud_sync） | **ログインして使っている**サービスだけが出るか。入れただけで使っていないものは出ない | Finder の左側にある場所、Apple ID → iCloud |
 | ブラウザ（browser） | Chrome・Edge・Firefox・Safari のうち入っているものと、そのバージョン | 各アプリの「について」 |

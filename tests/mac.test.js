@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFil
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import vm from "node:vm";
 
 const ROOT = resolve(import.meta.dir, "..");
 const MAC = join(ROOT, "security-checkup/checks/mac");
@@ -28,6 +29,7 @@ function env(extra = {}) {
     SC_HOME: home,
     SC_SOCKETFILTERFW: join(SHIMS, "socketfilterfw"),
     SC_SAFARI_APP: join(tmp, "no-safari.app"),
+    SC_XPROTECT_INFO: join(tmp, "no-xprotect-info.plist"),
     ...extra,
   };
 }
@@ -63,7 +65,8 @@ describe("mac parts: facts", () => {
   test("disk_encryption", () => {
     expect(part("disk_encryption")).toEqual({ facts: { encrypted: true }, unavailable: null });
     expect(part("disk_encryption", { SHIM_FDESETUP: "off" }).facts.encrypted).toBe(false);
-    expect(part("disk_encryption", { SHIM_FDESETUP: "progress" }).facts.encrypted).toBe(false);
+    expect(part("disk_encryption", { SHIM_FDESETUP: "progress" }).facts.encrypted).toBe(false); // "On." + "Encryption in progress"
+    expect(part("disk_encryption", { SHIM_FDESETUP: "offrestart" }).facts.encrypted).toBe(false);
     expect(part("disk_encryption", { SHIM_FDESETUP: "weird" }).unavailable).toBe("not_supported");
     expect(part("disk_encryption", { SHIM_FDESETUP: "fail" }).unavailable).toBe("needs_admin");
   });
@@ -126,6 +129,28 @@ describe("mac parts: facts", () => {
     expect(j.facts.products).toEqual([{ name: "XProtect", enabled: true, upToDate: null }]);
     expect(j.facts.definitionsUpdatedAt).toBe("2026-10-20");
     expect(j.facts.lastScanAt).toBe(null);
+  });
+
+  test("antivirus: XProtect.bundle date is used when newer than the install history (macOS 15+)", () => {
+    const info = join(tmp, "XProtect-Info.plist");
+    writeFileSync(info, "{}");
+    // newer bundle date wins
+    expect(part("antivirus", { SC_XPROTECT_INFO: info, SHIM_STAT_DAY: "2026-10-23" }).facts.definitionsUpdatedAt).toBe("2026-10-23");
+    // older bundle date: the history date (2026-10-20) wins
+    expect(part("antivirus", { SC_XPROTECT_INFO: info, SHIM_STAT_DAY: "2026-09-01" }).facts.definitionsUpdatedAt).toBe("2026-10-20");
+    // history empty / failing: the bundle date alone is used
+    const empty = join(tmp, "empty-history.json");
+    writeFileSync(empty, '{ "SPInstallHistoryDataType" : [ ] }');
+    expect(part("antivirus", { SC_XPROTECT_INFO: info, SHIM_STAT_DAY: "2026-10-22", SHIM_SYSPROF_FILE: empty }).facts.definitionsUpdatedAt).toBe("2026-10-22");
+    expect(part("antivirus", { SC_XPROTECT_INFO: info, SHIM_STAT_DAY: "2026-10-22", SHIM_SYSPROF: "fail" }).facts.definitionsUpdatedAt).toBe("2026-10-22");
+    // missing file, failing stat, or garbage output: ignored
+    expect(part("antivirus", { SHIM_STAT_DAY: "2026-10-23" }).facts.definitionsUpdatedAt).toBe("2026-10-20");
+    expect(part("antivirus", { SC_XPROTECT_INFO: info }).facts.definitionsUpdatedAt).toBe("2026-10-20");
+    expect(part("antivirus", { SC_XPROTECT_INFO: info, SHIM_STAT_DAY: "garbage" }).facts.definitionsUpdatedAt).toBe("2026-10-20");
+    // GNU/Linux stat (stat -f means filesystem status there) fails cleanly
+    const linux = part("antivirus", { SC_XPROTECT_INFO: info, SHIM_STAT: "real" });
+    expect(linux.unavailable).toBe(null);
+    expect(linux.facts.definitionsUpdatedAt).toBe("2026-10-20");
   });
 
   test("antivirus: history unreadable keeps the product list", () => {
@@ -198,6 +223,14 @@ describe("mac parts: facts", () => {
   });
 });
 
+// Evaluates the written data.js / questions.js in a sandbox with an empty window; returns that window.
+function loadJs(...files) {
+  const w = {};
+  const ctx = vm.createContext({ window: w });
+  for (const f of files) vm.runInContext(readFileSync(f, "utf8"), ctx);
+  return w;
+}
+
 describe("mac run.sh", () => {
   test("check writes a PcResult to a Japanese path with spaces", () => {
     const out = join(tmp, "診断 テスト", "結果.json");
@@ -265,16 +298,54 @@ describe("mac run.sh", () => {
     expect(r.code).toBe(0);
     expect(JSON.parse(r.out.trim()).report).toBe(join(outDir, "report.html"));
     expect(readdirSync(outDir).sort()).toEqual(["asklist.html", "baseline.js", "data.js", "engine.js", "pcs.html", "questions.js", "report.html", "scenes.js"]);
-    const data = readFileSync(join(outDir, "data.js"), "utf8");
-    expect(data.startsWith("window.SC_DATA = ")).toBe(true);
-    expect(JSON.parse(data.replace(/^window\.SC_DATA = /, "").replace(/;\s*$/, "")).mode).toBe("company");
-    expect(readFileSync(join(outDir, "questions.js"), "utf8").startsWith("window.SC_QUESTIONS = ")).toBe(true);
+    const w = loadJs(join(outDir, "data.js"), join(outDir, "questions.js"));
+    expect(readFileSync(join(outDir, "data.js"), "utf8").startsWith("window.SC_DATA = JSON.parse(\"")).toBe(true);
+    expect(w.SC_DATA.mode).toBe("company");
+    expect(w.SC_DATA).toEqual(JSON.parse(readFileSync(FIXTURE, "utf8")));
+    expect(w.SC_QUESTIONS).toEqual(JSON.parse(readFileSync(join(ROOT, "security-checkup/questions/company.json"), "utf8")));
     expect(readFileSync(join(outDir, "engine.js"), "utf8")).toContain("SC_ENGINE");
     expect(existsSync(log)).toBe(false);
     // without --no-open it opens report.html
     const r2 = run(join(MAC, "run.sh"), ["report", "--data", FIXTURE, "--outdir", outDir], { SHIM_OPEN_LOG: log });
     expect(r2.code).toBe(0);
     expect(readFileSync(log, "utf8").trim()).toBe(join(outDir, "report.html"));
+  });
+
+  test("report: data is only data (no code runs, whatever the JSON text contains)", () => {
+    const evil = '{"a":"x\\"});globalThis.pwned=1;//","b":"</script><script>globalThis.pwned=2</script>","c":"line\\u2028sep\\u2029\\ttab \\\\ back","d":"raw \u2028 \u2029 chars"}';
+    const f = join(tmp, "evil data.json");
+    writeFileSync(f, evil);
+    const outDir = join(tmp, "evil out");
+    expect(run(join(MAC, "run.sh"), ["report", "--data", f, "--outdir", outDir, "--no-open"]).code).toBe(0);
+    const js = readFileSync(join(outDir, "data.js"), "utf8");
+    expect(js).not.toContain("<");
+    expect(js).not.toContain("\u2028");
+    expect(js).not.toContain("\u2029");
+    const sandbox = { window: {}, globalThis: null };
+    const ctx = vm.createContext(sandbox);
+    vm.runInContext(js, ctx);
+    expect(sandbox.window.SC_DATA).toEqual(JSON.parse(evil));
+    expect(sandbox.pwned).toBeUndefined();
+    expect(vm.runInContext("typeof pwned", ctx)).toBe("undefined");
+  });
+
+  test("report rejects data that is a JS expression, not JSON (nothing is written)", () => {
+    for (const [i, bad] of ["1;globalThis.pwned=1", '"x"});alert(1)//', '{"a":1});globalThis.pwned=1;//', "{}\n;globalThis.pwned=1"].entries()) {
+      const f = join(tmp, "expr" + i + ".json");
+      writeFileSync(f, bad);
+      const outDir = join(tmp, "expr-out" + i);
+      expect(run(join(MAC, "run.sh"), ["report", "--data", f, "--outdir", outDir, "--no-open"]).code).not.toBe(0);
+      expect(existsSync(join(outDir, "data.js"))).toBe(false);
+    }
+  });
+
+  test("check: duplicate ids run once; glob characters in ids are not expanded", () => {
+    const out = join(tmp, "dup.json");
+    const r = run(join(MAC, "run.sh"), ["check", "--label", "x", "--checks", "firewall,firewall,*,local_admin", "--out", out]);
+    expect(r.code).toBe(0);
+    const j = JSON.parse(readFileSync(out, "utf8"));
+    expect(Object.keys(j.checks)).toEqual(["firewall", "*", "local_admin"]);
+    expect(j.checks["*"]).toEqual({ facts: {}, unavailable: "not_supported" });
   });
 
   test("report rejects invalid data", () => {

@@ -20,6 +20,13 @@ function Write-Utf8([string]$path, [string]$text) {
   if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
   [IO.File]::WriteAllText($path, $text, $utf8)
 }
+# JSON text -> JavaScript string literal for JSON.parse(...). The data is never placed into the page as a JS expression.
+# ConvertTo-Json escapes \ " and control characters; < and U+2028/2029 are escaped explicitly (PS 5.1 and 7 differ).
+function ConvertTo-JsLiteral([string]$text) {
+  $lit = ConvertTo-Json -InputObject $text -Compress
+  $lit = $lit.Replace("<", "\u003c").Replace([string][char]0x2028, "\u2028").Replace([string][char]0x2029, "\u2029")
+  return $lit
+}
 function Get-Roots() {
   $docs = $DocsRoot
   if (-not $docs) { $docs = [Environment]::GetFolderPath("MyDocuments") }
@@ -75,10 +82,10 @@ switch ($Command) {
       Copy-Item -LiteralPath (Join-Path $skill ("report\" + $f)) -Destination (Join-Path $dest $f) -Force
     }
     $q = [IO.File]::ReadAllText((Join-Path $skill "questions\company.json"), [Text.Encoding]::UTF8).Trim()
-    Write-Utf8 (Join-Path $dest "questions.js") ("window.SC_QUESTIONS = " + $q + ";`n")
+    Write-Utf8 (Join-Path $dest "questions.js") ("window.SC_QUESTIONS = JSON.parse(" + (ConvertTo-JsLiteral $q) + ");`n")
     $d = [IO.File]::ReadAllText((Resolve-Full $Data), [Text.Encoding]::UTF8).Trim()
     $null = ConvertFrom-Json -InputObject $d
-    Write-Utf8 (Join-Path $dest "data.js") ("window.SC_DATA = " + $d + ";`n")
+    Write-Utf8 (Join-Path $dest "data.js") ("window.SC_DATA = JSON.parse(" + (ConvertTo-JsLiteral $d) + ");`n")
     if (-not $NoOpen) { Start-Process -FilePath (Join-Path $dest "report.html") }
     Write-Output (ConvertTo-Json -InputObject ([ordered]@{ report = (Join-Path $dest "report.html") }) -Compress)
   }
