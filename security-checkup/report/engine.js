@@ -288,7 +288,111 @@ const SC_ENGINE = (function () {
     };
   }
 
-  const api = { evaluateCheck, latestPcs, aggregatePcs, answerStatus, combine, computeLevel, buildReport, CHECK_IDS };
+  // ---- HTML 描画（文字列を返す。値はすべてエスケープする）----
+  const STATUS_LABEL = { bad: "危ない", warn: "一部危ない", unknown: "わからない", ok: "守れている" };
+  const STATUS_CLASS = { bad: "bad", warn: "warn", unknown: "unk", ok: "ok" };
+  const LEVEL_TEXT = {
+    A: "大きな事故につながる穴は見つかりませんでした。",
+    B: "大きな穴はありませんが、直したほうがよい所がいくつかあります。",
+    C: "大きな事故が 1 つ起きると、業務が止まるおそれがあります。",
+    D: "重大な場面に危ない所があり、事故が起きると業務への影響が大きくなります。",
+    E: "重大な場面に危ない所が複数あり、早めの対応が必要です。",
+  };
+  const CHECK_NAME = {
+    antivirus: "ウイルス対策", disk_encryption: "ディスクの暗号化", os_update: "OS の更新", os_support: "OS のサポート期限",
+    firewall: "ファイアウォール", screen_lock: "画面ロック", local_admin: "管理者権限での利用", remote_access: "遠隔操作の入口",
+    vpn_client: "VPN", cloud_sync: "クラウド同期", browser: "ブラウザの版",
+  };
+  const REASON_TEXT = {
+    needs_admin: "管理者権限が必要", not_supported: "この PC では確認できません", error: "確認中にエラーが出ました", missing: "結果がありません",
+    unknown_check: "確認できません", no_product: "対象の製品が見つかりません", definitions_unknown: "定義ファイルの更新日がわかりません",
+    definitions_stale: "定義ファイルが古い", scan_stale: "しばらくスキャンされていません", past_end_of_support: "サポートが終了しています",
+    support_ending: "サポートがまもなく終わります", os_not_in_baseline: "基準表にない OS です", os_unknown: "OS の版がわかりません",
+    below_min: "版が古い", not_encrypted: "暗号化されていません", encryption_unknown: "暗号化の状態がわかりません",
+    update_stale: "更新が止まっています", update_unknown: "更新日がわかりません", firewall_off: "オフになっています", firewall_unknown: "状態がわかりません",
+    timeout_long: "ロックまでの時間が長い", no_password: "ロック解除にパスワードが要りません", lock_unknown: "設定がわかりません",
+    is_admin: "普段から管理者の権限で使っています", admin_unknown: "権限がわかりません", remote_enabled: "遠隔操作が有効です", remote_unknown: "状態がわかりません",
+    unapproved_service: "認めていないサービスが使われています", no_policy: "会社として認めたサービスが未確認です", browser_unknown: "版がわかりません",
+  };
+
+  function esc(v) {
+    return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function pill(status) {
+    const st = STATUS_LABEL[status] ? status : "unknown";
+    return '<span class="pill ' + STATUS_CLASS[st] + '">' + STATUS_LABEL[st] + "</span>";
+  }
+  function dateJa(s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(typeof s === "string" ? s : "");
+    return m ? m[1] + "年" + +m[2] + "月" + +m[3] + "日" : esc(s);
+  }
+  function navLinks(current, mode) {
+    const items = [["report.html", "レポート"], ["asklist.html", "聞くことリスト"]];
+    if (mode !== "pc") items.push(["pcs.html", "PC ごとの結果（担当者向け）"]);
+    return '<nav class="nav">' + items.map((it) => (it[0] === current ? '<span aria-current="page">' + it[1] + "</span>" : '<a href="' + it[0] + '">' + it[1] + "</a>")).join("") + "</nav>";
+  }
+
+  // meta: { name, date, mode } 省略可
+  function renderReport(report, role, meta) {
+    const m = meta || {};
+    const pcMode = m.mode === "pc";
+    const sm = report.pcSummary || {};
+    const title = pcMode ? "あなたの PC のセキュリティ診断" : (m.name ? esc(m.name) + " セキュリティ診断" : "セキュリティ診断");
+    const metaLines = [];
+    if (m.date) metaLines.push(dateJa(m.date) + " 診断");
+    if (!pcMode && typeof sm.total === "number") metaLines.push("PC " + sm.total + " 台中 " + sm.checked + " 台を確認");
+    const cards = (report.scenes || []).map((s) => {
+      const st = STATUS_LABEL[s.status] ? s.status : "unknown";
+      return '<div class="scene s-' + STATUS_CLASS[st] + '"><h3>' + esc(s.title) + " " + pill(st) + "</h3>" +
+        (s.text ? "<p>" + esc(s.text) + "</p>" : "") + (s.next ? '<div class="next">→ ' + esc(s.next) + "</div>" : "") + "</div>";
+    }).join("");
+    const notes = [];
+    if (role === "manager") notes.push("担当者に確認してもらった内容があれば、答えを足して、より詳しく確かめ直せます。この結果は経営者への質問だけで出した目安です。");
+    let foot = "";
+    if (!pcMode && (sm.unchecked > 0 || sm.checked === 0)) {
+      foot = '<div class="foot">' + (sm.checked === 0 ? "PC は 1 台も確認できていません（未確認 " + sm.total + " 台）。" : "未確認の PC が " + sm.unchecked + " 台あります。") +
+        "社員に「自分の PC の診断」を回してもらい、できた結果ファイルを「社員PC結果」フォルダに入れてもらうと、次の診断でこの結果に足されます。</div>";
+    }
+    return '<div class="paper"><div class="head"><h2>' + title + '</h2><div class="meta">' + metaLines.map(esc).join("<br>") + "</div></div>" +
+      navLinks("report.html", m.mode) +
+      '<div class="level"><div class="grade">' + esc(report.level) + '</div><p><b>' + esc(LEVEL_TEXT[report.level] || "") +
+      "</b><small>レベルは A〜E の目安です。目安で、安全を保証するものではありません。" +
+      "基準表：" + esc(report.baselineAsOf) + " 時点</small></p></div>" +
+      notes.map((n) => '<p class="note">' + esc(n) + "</p>").join("") +
+      '<div class="scenes">' + cards + "</div>" + foot + "</div>";
+  }
+
+  function renderAsklist(report, meta) {
+    const m = meta || {};
+    const list = report.asklist || [];
+    const body = list.length === 0
+      ? "<p>いま、業者や担当者に確認が必要な項目はありません。</p>"
+      : '<ol class="todo">' + list.map((a) => "<li><b>" + esc(a.text) + "</b><span>" + esc(a.howToAsk) + "</span></li>").join("") + "</ol>";
+    return '<div class="paper"><div class="head"><h2>業者・担当者に聞くことリスト</h2><div class="meta">基準表：' + esc(report.baselineAsOf) + " 時点</div></div>" +
+      navLinks("asklist.html", m.mode) +
+      "<p>診断で「わからない」「あとで確認」と答えた項目です。そのまま読み上げるか、メールに貼って聞いてください。</p>" + body + "</div>";
+  }
+
+  function renderPcs(diagnosis, ctx) {
+    const pcs = latestPcs(diagnosis.pcs);
+    const c = Object.assign({ answers: diagnosis.answers || {} }, ctx);
+    const cards = pcs.map((pc) => {
+      const rows = CHECK_IDS.map((id) => {
+        const res = pcCheck(pc, id, c);
+        const why = res.reason ? (REASON_TEXT[res.reason] || "") : "";
+        return "<tr><td>" + esc(CHECK_NAME[id]) + "</td><td>" + pill(res.status) + "</td><td>" + esc(why) + "</td></tr>";
+      }).join("");
+      const osName = pc.os === "mac" ? "Mac" : pc.os === "windows" ? "Windows" : "";
+      return '<section class="pc"><h3>' + esc(pc.label == null ? "（名前なし）" : pc.label) + '<span class="sub">' + esc(osName) +
+        (pc.checkedAt ? " ・ " + dateJa(pc.checkedAt) + " 確認" : "") + '</span></h3><div class="tablewrap"><table><thead><tr><th>項目</th><th>状態</th><th>理由</th></tr></thead><tbody>' + rows + "</tbody></table></div></section>";
+    }).join("");
+    return '<div class="paper"><div class="head"><h2>PC ごとの結果（担当者向け）</h2><div class="meta">確認できた PC ' + pcs.length + " 台</div></div>" +
+      navLinks("pcs.html", "company") +
+      '<p class="note">担当者向けのページです。社員の名前が出ているので、経営者や社員に見せたり、共有したりするときは注意してください。</p>' +
+      (pcs.length === 0 ? "<p>確認できた PC はまだありません。</p>" : cards) + "</div>";
+  }
+
+  const api = { evaluateCheck, latestPcs, aggregatePcs, answerStatus, combine, computeLevel, buildReport, CHECK_IDS, renderReport, renderAsklist, renderPcs };
   return api;
 })();
 
