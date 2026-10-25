@@ -66,9 +66,41 @@ describe("company.json の質問", () => {
     }
   });
 
-  test("経営者向けは 12 問以下、担当者向けは 35 問以下", () => {
-    expect(questions.filter((q) => q.roles.includes("manager")).length).toBeLessThanOrEqual(12);
+  test("設定を任せている人が答えるのは、経営者 13 問以下・担当者 24 問以下", () => {
+    const asked = (role) => questions.filter((q) => q.roles.includes(role) && !q.setupOnly).length;
+    expect(asked("manager")).toBeLessThanOrEqual(13);
+    expect(asked("admin")).toBeLessThanOrEqual(24);
     expect(questions.filter((q) => q.roles.includes("admin")).length).toBeLessThanOrEqual(35);
+  });
+
+  test("最初の質問は振り分け（it_setup）で、「自分がしている」がある", () => {
+    expect(questions[0].id).toBe("it_setup");
+    expect(questions[0].roles.sort()).toEqual(["admin", "manager"]);
+    expect(questions[0].options.map((o) => o.id)).toContain("self");
+    expect(questions[0].setupOnly).toBeUndefined();
+  });
+
+  test("設定した人だけに聞く質問は、業者でないと答えにくい 8 問で、経営者にも担当者にも付く", () => {
+    const only = questions.filter((q) => q.setupOnly === true).map((q) => q.id).sort();
+    expect(only).toEqual([
+      "backup_generations", "backup_location", "backup_restore_tested", "departed_accounts_count",
+      "departed_accounts_days", "mfa_coverage", "nas_updated", "vpn_updated",
+    ]);
+    for (const id of only) expect(byId[id].roles.sort(), id).toEqual(["admin", "manager"]);
+    for (const q of questions) if (q.setupOnly !== undefined) expect(q.setupOnly, q.id).toBe(true);
+  });
+
+  test("機器とシステムの更新（systems_updated）は全員に聞き、VPN を含めて聞く", () => {
+    const q = byId.systems_updated;
+    expect(q.roles.sort()).toEqual(["admin", "manager"]);
+    expect(q.setupOnly).toBeUndefined();
+    expect(q.when).toBeUndefined();
+    expect(q.text).toContain("VPN");
+  });
+
+  test("言葉を知らなくても答えられるよう、2 段階認証と VPN の質問文に専門用語を使わない", () => {
+    expect(byId.mfa_enabled.text).not.toMatch(/2 段階認証|二段階/);
+    expect(byId.vpn_used.text).not.toMatch(/VPN/);
   });
 
   test("設計書 5 章の 8 領域がすべてある", () => {

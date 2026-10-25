@@ -452,7 +452,7 @@ const SC_ENGINE = (function () {
       : '<ol class="todo">' + list.map((a) => "<li><b>" + esc(a.text) + "</b><span>" + esc(a.howToAsk) + "</span></li>").join("") + "</ol>";
     return '<div class="paper"><div class="head"><h2>業者・担当者に聞くことリスト</h2><div class="meta">基準表：' + esc(report.baselineAsOf) + " 時点</div></div>" +
       navLinks("asklist.html", m.mode) +
-      "<p>診断で「わからない」「あとで確認」と答えた項目です。そのまま読み上げるか、メールに貼って聞いてください。</p>" + body + "</div>";
+      "<p>診断で「わからない」「あとで確認」と答えた項目と、設定を任せている業者や担当者に回した項目です。そのまま読み上げるか、メールに貼って聞いてください。</p>" + body + "</div>";
   }
 
   function renderPcs(diagnosis, ctx) {

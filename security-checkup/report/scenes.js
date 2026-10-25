@@ -88,6 +88,9 @@ const SC_SCENES = (function () {
     return { status, facts: { signals: sigs } };
   }
   const asked = (answers, id) => (answers || {})[id] !== undefined;
+  // 社外から社内につないでいる（または、つないでいないと言い切れない）会社。
+  // 社外から使っていて、VPN を「使っていない」とはっきり答えたときだけ外す（クラウドだけで使っている会社）
+  const connectsIn = (answers) => list((answers || {}).telework).indexOf("yes") >= 0 && list((answers || {}).vpn_used).indexOf("no") < 0;
 
   function allowedCloud(answers) {
     const a = answers || {};
@@ -490,6 +493,7 @@ const SC_SCENES = (function () {
     else if (okSig(f, "vpn_updated")) said.push("社外からつなぐための機器（VPN）は、最新の状態か確かめてあります。");
     else if (val("vpn_used").indexOf("no") >= 0) said.push("社外からつなぐのに VPN は使っていません。");
     else said.push("社外からつなぐための機器（VPN）が最新の状態かは、担当者に確かめてください。");
+    if (okSig(f, "systems_updated")) said.push("会社の機器やシステムの更新も、定期的にしています。");
     if (okSig(f, "remote_desktop")) said.push("社内の PC を外から直接操作する仕組みも使っていません。");
     said.push("確認した PC にも、外から入られる設定は見つかりませんでした。");
     return said.join("");
@@ -500,7 +504,7 @@ const SC_SCENES = (function () {
     title: "外から社内に入られたら",
     critical: true,
     pcScene: false,
-    answerIds: ["telework", "vpn_used", "vpn_updated", "remote_desktop"],
+    answerIds: ["telework", "vpn_used", "vpn_updated", "systems_updated", "remote_desktop"],
     evaluate(d, ctx, engine) {
       const answers = ctx.answers || {};
       const tele = { telework: ["yes"] };
@@ -515,6 +519,9 @@ const SC_SCENES = (function () {
         answerSig(ctx, engine, "vpn_used", { yes: "ok", no: "ok" }, tele),
         // VPN 機器は国内のランサムウェアの侵入口で最も多いため、確かめていなければ bad（裁定 9）
         answerSig(ctx, engine, "vpn_updated", { yes: "ok", no: "bad" }, { telework: ["yes"], vpn_used: ["yes"] }),
+        // 社外から社内につなぐ会社では、機器やシステムの更新を誰もしていなければ bad（VPN 機器と同じ理由）。
+        // それ以外の会社では、社内のネットワークの場面で warn として数える
+        connectsIn(answers) ? answerSig(ctx, engine, "systems_updated", { yes: "ok", no: "bad" }) : null,
         answerSig(ctx, engine, "remote_desktop", { no: "ok", yes: "warn" }, tele),
         usesVpn && vpnPcs.length > 0 ? pcSig(ctx, engine, "vpn_client", "vpn_client", null, vpnPcs) : null,
         pcSig(ctx, engine, "remote_access", "remote_access"),
@@ -528,6 +535,10 @@ const SC_SCENES = (function () {
       vpn_updated: {
         bad: () => "社外からつなぐための機器（VPN）が最新の状態か、確かめていません。古いままの VPN 機器は、ランサムウェアの侵入口として最も多く狙われています。",
         unknown: () => "社外からつなぐための機器（VPN）が最新の状態か、把握している人がいませんでした。",
+      },
+      systems_updated: {
+        bad: () => "社外から社内につないでいるのに、VPN などの機器やシステムを定期的に更新している人がいません。古いままの VPN 機器は、ランサムウェアの侵入口として最も多く狙われています。",
+        unknown: () => "会社の機器やシステムを定期的に更新しているか、把握している人がいませんでした。",
       },
       remote_desktop: {
         warn: () => "社外から社内の PC の画面を直接操作する仕組みを使っていて、パスワードが破られると中に入られます。",
@@ -552,6 +563,7 @@ const SC_SCENES = (function () {
     hint: {
       confirm_remote: "社外からのつなぎ方（VPN の有無、外から PC を操作する仕組み）を担当者に確かめてもらってください。",
       vpn_updated: "機器のメーカー名と型番を控え、最新の更新が当たっているかを業者に確かめてください。",
+      systems_updated: "社外からつなぐ機器（VPN）、ルーター、業務ソフトの順に、更新を誰が受け持つかを業者と決めてください。保守の契約があれば、その範囲に更新が入っているかを確かめてください。",
       remote_desktop: "VPN を通したときだけ使えるようにし、2 段階認証を付けられるか業者に相談してください。",
       vpn_client: "PC ごとの結果の一覧で、該当する PC を確かめてください。",
       remote_access: "PC ごとの結果の一覧で、該当する PC と、その設定が業務で必要かを確かめてください。",
@@ -562,6 +574,7 @@ const SC_SCENES = (function () {
       telework: { unknown: ASK },
       vpn_used: { unknown: ASK },
       vpn_updated: { bad: "VPN の機器が最新か、今週中に業者に確かめる", unknown: "VPN の機器が最新か業者に確かめる" },
+      systems_updated: { bad: "VPN などの機器の更新を誰がするか、業者と決める", unknown: ASK },
       remote_desktop: { warn: "VPN を通したときだけ使えるようにする", unknown: ASK },
       vpn_client: { warn: (s) => problems(s) + " 台の VPN のソフトを更新する", bad: (s) => problems(s) + " 台の VPN のソフトを更新する", unknown: pcNextUnknown },
       remote_access: { warn: (s) => problems(s) + " 台で、その設定が業務で要るか確かめる", bad: (s) => problems(s) + " 台で、その設定が業務で要るか確かめる", unknown: pcNextUnknown },
@@ -811,6 +824,7 @@ const SC_SCENES = (function () {
     if (okSig(f, "wifi_guest_separated")) said.push("来客用の Wi-Fi は分かれています。");
     if (okSig(f, "wifi_password_changed")) said.push("Wi-Fi のパスワードも変えています。");
     if (okSig(f, "nas_updated")) said.push("共有フォルダ用の機器も、最新か確かめてあります。");
+    if (okSig(f, "systems_updated")) said.push("会社の機器やシステムの更新も、定期的にしています。");
     if (okSig(f, "cloud_sync")) said.push("確認した PC の同期ソフトは、会社が使っているものだけです。");
     return said.length ? said.join("") : "回答の範囲では、問題は見つかりませんでした。";
   }
@@ -820,7 +834,7 @@ const SC_SCENES = (function () {
     title: "社内の Wi-Fi と共有フォルダ",
     critical: false,
     pcScene: false,
-    answerIds: ["wifi_guest_separated", "wifi_password_changed", "nas_exists", "nas_updated", "mail_service", "cloud_extra", "cloud_extra_which"],
+    answerIds: ["wifi_guest_separated", "wifi_password_changed", "nas_exists", "nas_updated", "systems_updated", "mail_service", "cloud_extra", "cloud_extra_which"],
     evaluate(d, ctx, engine) {
       const allowed = allowedCloud(ctx.answers);
       // メール・ファイル共有の質問が聞かれていない（経営者だけの回答など）ときは、方針を「決める」と促さず、この項目を数えない
@@ -834,6 +848,8 @@ const SC_SCENES = (function () {
         answerSig(ctx, engine, "wifi_password_changed", { yes: "ok", no: "warn" }),
         answerSig(ctx, engine, "nas_exists", { yes: "ok", no: "ok" }),
         answerSig(ctx, engine, "nas_updated", { yes: "ok", no: "warn" }, { nas_exists: ["yes"] }),
+        // 社外から社内につなぐ会社では、外からの侵入の場面で数える（二重に数えない）
+        connectsIn(ctx.answers) ? null : answerSig(ctx, engine, "systems_updated", { yes: "ok", no: "warn" }),
         cloud,
       ]);
     },
@@ -851,6 +867,10 @@ const SC_SCENES = (function () {
         warn: () => "共有フォルダ用の機器が最新の状態か、確かめていません。",
         unknown: () => "共有フォルダ用の機器が最新の状態か、把握している人がいませんでした。",
       },
+      systems_updated: {
+        warn: () => "ルーターや共有フォルダの機器、業務ソフトなど、会社の機器やシステムを定期的に更新している人がいません。",
+        unknown: () => "会社の機器やシステムを定期的に更新しているか、把握している人がいませんでした。",
+      },
       cloud_sync: {
         warn: (s) => of(s, problems(s)) + "に、会社として使っていないクラウドの同期ソフト" + (s.extra && s.extra.length ? "（" + s.extra.join("、") + "）" : "") + "が入っています。",
         bad: (s) => of(s, problems(s)) + "に、会社として使っていないクラウドの同期ソフト" + (s.extra && s.extra.length ? "（" + s.extra.join("、") + "）" : "") + "が入っています。",
@@ -861,6 +881,7 @@ const SC_SCENES = (function () {
       wifi_guest_separated: "Wi-Fi の機器に「ゲスト用」の設定があれば、それを使うと分けられます。",
       wifi_password_changed: "パスワードを変えたら、社員にだけ新しいものを伝えてください。",
       nas_updated: "機器の管理画面か業者に、最新の更新が当たっているかを確かめてください。",
+      systems_updated: "ルーター、共有フォルダの機器、業務ソフトの更新を誰が受け持つかを業者と決めてください。保守の契約があれば、その範囲に更新が入っているかを確かめてください。",
       cloud_sync: (s) => (reasonN(s, "no_policy") ? "会社として使うメールとファイル共有のサービスを決めて、この診断の質問に答え直してください。" : "仕事のファイルを個人のクラウドに置いていないか、持ち主に聞いてください。"),
     },
     next: {
@@ -868,6 +889,7 @@ const SC_SCENES = (function () {
       wifi_password_changed: { warn: "Wi-Fi のパスワードを変える", unknown: ASK },
       nas_exists: { unknown: ASK },
       nas_updated: { warn: "共有フォルダ用の機器が最新か確かめる", unknown: ASK },
+      systems_updated: { warn: "機器やシステムの更新を誰がするか、業者と決める", unknown: ASK },
       cloud_sync: {
         warn: "会社で使うクラウドのサービスを決めて、社員に伝える",
         bad: "会社で使うクラウドのサービスを決めて、社員に伝える",
