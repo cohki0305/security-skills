@@ -1,0 +1,8 @@
+{
+  "name": "security-skills",
+  "private": true,
+  "description": "security-checkup スキルの開発用（配布物には含めない）",
+  "scripts": {
+    "test": "bun test"
+  }
+}
