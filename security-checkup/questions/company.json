@@ -1,6 +1,21 @@
 {
   "questions": [
     {
+      "id": "it_setup",
+      "domain": "incident",
+      "roles": ["manager", "admin"],
+      "text": "会社の PC やネット、メールの設定は、ふだん誰がしていますか",
+      "textEasy": "会社の PC やネット、メールの設定を変えたり、新しく用意したりするのは、ふだん誰ですか",
+      "multiSelect": false,
+      "options": [
+        { "id": "self", "label": "自分がしている" },
+        { "id": "others", "label": "業者や社内の別の人に任せている" },
+        { "id": "unknown", "label": "わからない" },
+        { "id": "later", "label": "あとで確認" }
+      ],
+      "howToAsk": "会社の PC やネット、メールの設定は、どなたが担当していますか。業者に任せている場合は、業者の名前と、任せている範囲も教えてください。"
+    },
+    {
       "id": "security_owner",
       "domain": "incident",
       "roles": ["manager", "admin"],
@@ -33,7 +48,8 @@
     {
       "id": "departed_accounts_days",
       "domain": "account",
-      "roles": ["admin"],
+      "roles": ["manager", "admin"],
+      "setupOnly": true,
       "text": "最近辞めた人のアカウントは、退職日から何日で止めましたか",
       "textEasy": "いちばん最近辞めた人のメールなどが使えなくなったのは、辞めた日からどのくらいあとでしたか",
       "multiSelect": false,
@@ -50,7 +66,8 @@
     {
       "id": "departed_accounts_count",
       "domain": "account",
-      "roles": ["admin"],
+      "roles": ["manager", "admin"],
+      "setupOnly": true,
       "text": "辞めた人のアカウントで、まだ止めていないものは何件ありますか",
       "textEasy": "メールやファイル共有の管理画面を見たとき、もう辞めた人のアカウントが残っていませんか。名前ではなく件数で答えてください",
       "multiSelect": false,
@@ -66,8 +83,8 @@
       "id": "shared_accounts",
       "domain": "account",
       "roles": ["admin"],
-      "text": "1 つの ID とパスワードを、何人かで使い回しているアカウントはありますか",
-      "textEasy": "たとえば経理のシステムに、みんなが同じ ID とパスワードで入っていませんか",
+      "text": "何人かで同じ ID とパスワードを使って入っているサービスはありますか（会社の通販サイトのアカウント、共通のメールアドレスなど）",
+      "textEasy": "たとえば会社の通販サイトや経理のシステムに、みんなが同じ ID とパスワードで入っていませんか",
       "multiSelect": false,
       "options": [
         { "id": "none", "label": "ない" },
@@ -111,12 +128,12 @@
       "id": "mail_service",
       "domain": "email",
       "roles": ["admin"],
-      "text": "会社のメールは、どのサービスを使っていますか",
+      "text": "会社のメールは、どちらの画面で読んでいますか",
       "textEasy": "会社のメールを読むときに開いている画面は、Gmail と Outlook のどちらに近いですか",
       "multiSelect": false,
       "options": [
-        { "id": "google", "label": "Google Workspace（Gmail）" },
-        { "id": "microsoft", "label": "Microsoft 365（Outlook）" },
+        { "id": "google", "label": "Gmail の画面（Google Workspace）" },
+        { "id": "microsoft", "label": "Outlook の画面（Microsoft 365）" },
         { "id": "unknown", "label": "わからない" },
         { "id": "later", "label": "あとで確認" }
       ],
@@ -126,12 +143,12 @@
       "id": "mfa_enabled",
       "domain": "email",
       "roles": ["manager", "admin"],
-      "text": "会社のメールに入るとき、2 段階認証を使っていますか",
-      "textEasy": "会社のメールに入るとき、パスワードのほかに、スマホに届く番号やアプリでの確認も求められますか",
+      "text": "新しい PC やスマホで会社のメールに入るとき、パスワードのあとに、スマホに届いた番号を入れたり、スマホで「承認」を押したりしますか",
+      "textEasy": "初めて使う PC やスマホで会社のメールを開くとき、パスワードのほかに、スマホに届いた番号を入れたり、スマホで「承認」を押したりしますか",
       "multiSelect": false,
       "options": [
-        { "id": "yes", "label": "使っている" },
-        { "id": "no", "label": "使っていない" },
+        { "id": "yes", "label": "する" },
+        { "id": "no", "label": "しない（パスワードだけで入れる）" },
         { "id": "unknown", "label": "わからない" },
         { "id": "later", "label": "あとで確認" }
       ],
@@ -140,7 +157,8 @@
     {
       "id": "mfa_coverage",
       "domain": "email",
-      "roles": ["admin"],
+      "roles": ["manager", "admin"],
+      "setupOnly": true,
       "text": "2 段階認証は、社員全員がオンになっていますか",
       "textEasy": "スマホでの確認は、一部の人だけでなく全員に求められていますか",
       "multiSelect": false,
@@ -158,12 +176,12 @@
       "id": "email_misdelivery",
       "domain": "email",
       "roles": ["admin"],
-      "text": "社外へのメールの誤送信を防ぐ仕組みを入れていますか",
+      "text": "社外にメールを送るとき、送る前に宛先の確認画面が出たり、添付ファイルが自動でダウンロードのリンクに変わったりしますか",
       "textEasy": "社外にメールを送る前に宛先を確かめる画面が出る、送ったあと少しの間なら取り消せる、といった仕組みはありますか",
       "multiSelect": false,
       "options": [
-        { "id": "yes", "label": "入れている" },
-        { "id": "no", "label": "入れていない" },
+        { "id": "yes", "label": "どちらかがある" },
+        { "id": "no", "label": "どちらもない" },
         { "id": "unknown", "label": "わからない" },
         { "id": "later", "label": "あとで確認" }
       ],
@@ -187,7 +205,8 @@
     {
       "id": "backup_location",
       "domain": "backup",
-      "roles": ["admin"],
+      "roles": ["manager", "admin"],
+      "setupOnly": true,
       "text": "バックアップはどこに保存していますか",
       "textEasy": "写しを置いている場所は、元のデータとは別の場所ですか",
       "multiSelect": false,
@@ -204,7 +223,8 @@
     {
       "id": "backup_generations",
       "domain": "backup",
-      "roles": ["admin"],
+      "roles": ["manager", "admin"],
+      "setupOnly": true,
       "text": "バックアップは、何日か前の状態にもさかのぼって戻せますか",
       "textEasy": "写しは毎回上書きしていますか。それとも何日か前の分も残っていますか",
       "multiSelect": false,
@@ -221,7 +241,8 @@
     {
       "id": "backup_restore_tested",
       "domain": "backup",
-      "roles": ["admin"],
+      "roles": ["manager", "admin"],
+      "setupOnly": true,
       "text": "この 1 年で、バックアップから実際にデータを戻せるか試しましたか",
       "textEasy": "写しから、ファイルを 1 つでも元に戻してみたことはありますか",
       "multiSelect": false,
@@ -254,13 +275,13 @@
       "id": "vpn_used",
       "domain": "remote",
       "roles": ["admin"],
-      "text": "社外から社内につなぐとき、VPN を使っていますか",
-      "textEasy": "自宅などから会社のネットワークにつなぐための専用のソフトや機器（VPN）を使っていますか",
+      "text": "家や出先から社内のファイルやシステムを使うとき、先に専用のアプリを立ち上げて会社につなぎますか",
+      "textEasy": "会社の外から社内のファイルを開くとき、その前に、会社につなぐための専用のアプリを立ち上げますか",
       "multiSelect": false,
       "when": { "telework": ["yes"] },
       "options": [
-        { "id": "yes", "label": "使っている" },
-        { "id": "no", "label": "使っていない" },
+        { "id": "yes", "label": "つなぐ（VPN などのアプリ）" },
+        { "id": "no", "label": "つながない・そのまま開ける" },
         { "id": "unknown", "label": "わからない" },
         { "id": "later", "label": "あとで確認" }
       ],
@@ -270,7 +291,8 @@
     {
       "id": "vpn_updated",
       "domain": "remote",
-      "roles": ["admin"],
+      "roles": ["manager", "admin"],
+      "setupOnly": true,
       "text": "VPN の機器が最新の状態になっているか、この 3 か月以内に確かめましたか",
       "textEasy": "社外からつなぐための機器が新しい状態になっているか、最近だれかが確かめましたか",
       "multiSelect": false,
@@ -288,28 +310,43 @@
       "id": "remote_desktop",
       "domain": "remote",
       "roles": ["admin"],
-      "text": "社外から、社内の PC やサーバーの画面を直接操作する仕組み（リモートデスクトップなど）を使っていますか",
+      "text": "家や出先から、会社の PC の画面をそのまま操作することはありますか（TeamViewer、Chrome リモート デスクトップなど）",
       "textEasy": "自宅などから、会社に置いてある PC の画面を開いてそのまま操作することはありますか",
       "multiSelect": false,
       "when": { "telework": ["yes"] },
       "options": [
-        { "id": "no", "label": "使っていない" },
-        { "id": "yes", "label": "使っている" },
+        { "id": "no", "label": "ない" },
+        { "id": "yes", "label": "ある" },
         { "id": "unknown", "label": "わからない" },
         { "id": "later", "label": "あとで確認" }
       ],
       "howToAsk": "社外から社内の PC やサーバーの画面を操作する仕組み（リモートデスクトップや遠隔操作のソフト）を使っていますか。使っている場合は、ソフトの名前も教えてください。"
     },
     {
+      "id": "systems_updated",
+      "domain": "remote",
+      "roles": ["manager", "admin"],
+      "text": "VPN、ルーター、共有フォルダの機器、会計などの業務ソフトといった、会社で使っている機器やシステムの更新を、誰かが定期的にしていますか",
+      "textEasy": "会社で使っている機器やソフト（社外からつなぐ機器、ルーター、ファイルを置く機器、会計ソフトなど）を新しい状態にする作業を、業者か社内の誰かが定期的にしていますか",
+      "multiSelect": false,
+      "options": [
+        { "id": "yes", "label": "している（業者の保守や社内の担当）" },
+        { "id": "no", "label": "していない・決まっていない" },
+        { "id": "unknown", "label": "わからない" },
+        { "id": "later", "label": "あとで確認" }
+      ],
+      "howToAsk": "会社で使っている機器やシステム（VPN、ルーター、NAS、業務ソフトなど）の更新は、どなたが、どのくらいの間隔でしていますか。保守の契約に入っている場合は、その範囲も教えてください。"
+    },
+    {
       "id": "wifi_guest_separated",
       "domain": "network",
       "roles": ["admin"],
-      "text": "来客用の Wi-Fi は、社員が使う Wi-Fi と分けていますか",
-      "textEasy": "お客さんに使ってもらう Wi-Fi は、社員の PC がつながっている Wi-Fi とは別のものですか",
+      "text": "来客に Wi-Fi を貸すとき、社員と同じ Wi-Fi の名前とパスワードを教えていますか",
+      "textEasy": "お客さんに Wi-Fi を使ってもらうとき、社員の PC がつながっているのと同じ Wi-Fi のパスワードを教えていますか",
       "multiSelect": false,
       "options": [
-        { "id": "separated", "label": "分けている・来客には貸していない" },
-        { "id": "same", "label": "同じ Wi-Fi を使ってもらっている" },
+        { "id": "separated", "label": "教えていない（来客用が別にある・貸していない）" },
+        { "id": "same", "label": "社員と同じものを教えている" },
         { "id": "unknown", "label": "わからない" },
         { "id": "later", "label": "あとで確認" }
       ],
@@ -334,7 +371,7 @@
       "id": "nas_exists",
       "domain": "network",
       "roles": ["admin"],
-      "text": "社内に、共有フォルダ用の機器（NAS やファイルサーバー）はありますか",
+      "text": "社内に、みんながファイルを置く共有フォルダ用の箱型の機器（NAS など）はありますか",
       "textEasy": "みんなでファイルを置いておく箱のような機器が、社内に置いてありますか",
       "multiSelect": false,
       "options": [
@@ -348,7 +385,8 @@
     {
       "id": "nas_updated",
       "domain": "network",
-      "roles": ["admin"],
+      "roles": ["manager", "admin"],
+      "setupOnly": true,
       "text": "共有フォルダ用の機器が最新の状態になっているか、この 1 年以内に確かめましたか",
       "textEasy": "ファイルを置いておく機器の中身が新しい状態になっているか、最近だれかが確かめましたか",
       "multiSelect": false,

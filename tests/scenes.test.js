@@ -276,6 +276,44 @@ describe("場面の判定", () => {
     expect(t).toContain("保存先");
   });
 
+  test("systems_updated：社外から社内につなぐ会社で「していない」なら外からの侵入が bad、社内のネットワークでは数えない", () => {
+    for (const a of [{ telework: "yes", vpn_used: "yes" }, { telework: "yes" }, { telework: "yes", vpn_used: "unknown" }]) {
+      const d = company({ ...a, systems_updated: "no", remote_desktop: "no" }, [okPc()]);
+      const out = run("remote_intrusion", d);
+      expect(out.status, JSON.stringify(a)).toBe("bad");
+      expect(byId.remote_intrusion.text.admin.bad(out.facts)).toContain("定期的に更新している人がいません");
+      expect(byId.remote_intrusion.next.bad(out.facts)).toContain("業者と決める");
+      expect(run("office_network", d).facts.signals.some((s) => s.key === "systems_updated")).toBe(false);
+    }
+  });
+
+  test("systems_updated：社外からつながない・VPN を使わない会社では、社内のネットワークの warn", () => {
+    for (const a of [{ telework: "no" }, { telework: "yes", vpn_used: "no", remote_desktop: "no" }, {}]) {
+      const d = company({ ...a, systems_updated: "no", wifi_guest_separated: "separated", wifi_password_changed: "yes", nas_exists: "no" }, [okPc()]);
+      const net = run("office_network", d);
+      expect(net.status, JSON.stringify(a)).toBe("warn");
+      expect(byId.office_network.text.admin.warn(net.facts)).toContain("定期的に更新している人がいません");
+      expect(run("remote_intrusion", d).facts.signals.some((s) => s.key === "systems_updated")).toBe(false);
+    }
+  });
+
+  test("systems_updated：「している」なら ok の文言に書く", () => {
+    const out = run("remote_intrusion", company({ telework: "yes", vpn_used: "yes", vpn_updated: "yes", systems_updated: "yes", remote_desktop: "no" }, [okPc()]));
+    expect(out.status).toBe("ok");
+    expect(byId.remote_intrusion.text.manager.ok(out.facts)).toContain("更新も、定期的にしています");
+  });
+
+  test("振り分けで業者に回した深掘り（later）は、重大な場面を ok にせず聞くことリストに載る", () => {
+    const answers = { it_setup: "others", backup_exists: "yes", backup_location: "later", backup_generations: "later", backup_restore_tested: "later", departed_accounts_process: "yes", departed_accounts_count: "later", departed_accounts_days: "later" };
+    const d = company(answers, [okPc()]);
+    expect(run("ransomware", d).status).toBe("unknown");
+    expect(run("departed_accounts", d).status).toBe("unknown");
+    const rep = E.buildReport(d, SCENES, B, TODAY, questions);
+    const ids = rep.asklist.map((x) => x.questionId);
+    for (const id of ["backup_location", "backup_generations", "backup_restore_tested", "departed_accounts_count", "departed_accounts_days"]) expect(ids, id).toContain(id);
+    expect(ids).not.toContain("it_setup");
+  });
+
   test("vpn_updated が「確かめていない」なら bad（裁定 9）", () => {
     const out = run("remote_intrusion", company({ telework: "yes", vpn_used: "yes", vpn_updated: "no", remote_desktop: "no" }, [okPc()]));
     expect(out.status).toBe("bad");
