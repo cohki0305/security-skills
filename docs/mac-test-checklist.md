@@ -37,13 +37,19 @@ Finder で「書類」を開くと「セキュリティ診断」フォルダが�
 ## 2. 11 項目を調べる
 
 ```
+bash security-checkup/checks/mac/run.sh check --label テスト --out "$HOME/Documents/セキュリティ診断/試し/mac-result.json"
+```
+
+何も表示されずに終われば成功です。「書類」の「セキュリティ診断」の中の「試し」フォルダに `mac-result.json` ができます。中身を見ます。
+
+```
+cat "$HOME/Documents/セキュリティ診断/試し/mac-result.json"
+```
+
+保存先は「セキュリティ診断」フォルダの中に限られます。外を指定すると `--out must be inside the output folder` と出て、何も書かれません。念のため、次のコマンドがこのエラーで止まり、デスクトップに何もできないことも確かめてください。
+
+```
 bash security-checkup/checks/mac/run.sh check --label テスト --out ~/Desktop/mac-result.json
-```
-
-何も表示されずに終われば成功です。デスクトップに `mac-result.json` ができます。中身を見ます。
-
-```
-cat ~/Desktop/mac-result.json
 ```
 
 ## 3. 結果を確かめる
@@ -79,7 +85,7 @@ cat ~/Desktop/mac-result.json
 ## 4. レポートを作る（見本のデータで）
 
 ```
-bash security-checkup/checks/mac/run.sh report --data tests/fixtures/diagnosis-company.json --outdir ~/Desktop/mac-report
+bash security-checkup/checks/mac/run.sh report --data tests/fixtures/diagnosis-company.json --outdir "$HOME/Documents/セキュリティ診断/試し/mac-report"
 ```
 
 ブラウザでレポートが開けば成功です。確かめること。
@@ -93,7 +99,7 @@ bash security-checkup/checks/mac/run.sh report --data tests/fixtures/diagnosis-c
 ## 5. 日本語と空白が入った保存先でも動くか
 
 ```
-bash security-checkup/checks/mac/run.sh check --label "テスト 花子" --out "$HOME/Desktop/診断 テスト/結果.json"
+bash security-checkup/checks/mac/run.sh check --label "テスト 花子" --out "$HOME/Documents/セキュリティ診断/試し/診断 テスト/結果.json"
 ```
 
 `診断 テスト` フォルダの中に `結果.json` ができれば合格です。
@@ -101,11 +107,11 @@ bash security-checkup/checks/mac/run.sh check --label "テスト 花子" --out "
 続けて、このフォルダを「社員PC結果」の代わりにして、レポートに取り込めるかも確かめます。
 
 ```
-bash security-checkup/checks/mac/run.sh report --data tests/fixtures/diagnosis-company.json --outdir ~/Desktop/mac-report --pcs-dir "$HOME/Desktop/診断 テスト"
+bash security-checkup/checks/mac/run.sh report --data tests/fixtures/diagnosis-company.json --outdir "$HOME/Documents/セキュリティ診断/試し/mac-report" --pcs-dir "$HOME/Documents/セキュリティ診断/試し/診断 テスト"
 ```
 
 `mac-report` の中に `pcs.js` ができ、「PC ごとの結果」のページに、`テスト 花子` の PC が 1 台出れば合格です（見本のデータの PC と並んで出ます）。
 
 ## 6. 後片付け
 
-デスクトップの `mac-result.json`、`mac-report` フォルダ、`診断 テスト` フォルダは、確認が終わったら捨てて構いません。「書類」の「セキュリティ診断」フォルダは、本番でも使うので残して構いません。
+「セキュリティ診断」の中の「試し」フォルダは、確認が終わったら捨てて構いません。「セキュリティ診断」フォルダそのものは、本番でも使うので残して構いません。
