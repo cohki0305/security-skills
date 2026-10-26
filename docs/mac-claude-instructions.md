@@ -14,7 +14,7 @@ Mac で動く Claude Code に渡す指示書です。読み手は、このリポ
 この作業で見つけるのは問題点です。直すのは別の担当者です。
 
 - 作業場所: `~/security-skills`（main ブランチ）
-- 現状: Linux 上で `bun test` が 208 件すべて通っている
+- 現状: Linux 上で `bun test` が 216 件すべて通っている
 - 作業量の目安: 30〜40 分（そのうち利用者に設定画面を見てもらう時間が半分ほど）
 
 ## 作業ルール
@@ -77,13 +77,8 @@ id -Gn
 
 スキルの許可の設定（`security-checkup/SKILL.md` の `allowed-tools`）が Mac で効くかを確かめる。ここは利用者に手を動かしてもらう。
 
-1. `~/.claude/skills/security-checkup` が既にあるか確かめる。あれば、上書きしてよいか利用者に聞く。
-2. スキルを置く。
-
-   ```
-   mkdir -p ~/.claude/skills
-   cp -R ~/security-skills/security-checkup ~/.claude/skills/
-   ```
+1. `docs/mac-install-latest.md` の Task 3 のとおりにスキルを置く。古い版があれば、上書きせずにゴミ箱へ移してから置く（上書きすると、古い版にだけあったファイルが残る）。
+2. `diff -r ~/security-skills/security-checkup ~/.claude/skills/security-checkup` で何も出ないことを確かめる。
 
 3. 利用者に、**新しいターミナルで新しい Claude Code を起動して**、次の 2 つを試してもらう。今のセッションにはスキルが読み込まれていないため、新しいセッションが要る。
    - 「PC の診断をしたい」と話しかけ、一般社員として最後まで答える
