@@ -80,14 +80,6 @@ bash ${CLAUDE_SKILL_DIR}/checks/mac/run.sh report --data "<diagnosis.json>" --ou
 - 「Other」の自由入力：近い選択肢の `id` に寄せない。回答は `unknown` とし、書かれた内容は会話中のメモに残す（`diagnosis.json` に個人名は書かない）。
 - 深掘りはしない。質問ファイルにある分岐だけ聞く。答えられないときは `unknown` で進める。
 
-#### スクリーンショット（任意）
-
-次の質問は、重大な場面（バックアップ、退職者アカウント、メール、外からのアクセス）に効く。これらを聞くとき、各場面につき 1 回だけ「管理画面のスクリーンショットを貼れるなら貼ってください（なくても進めます）」と頼む。
-
-- `backup_exists` ほかバックアップの質問、`departed_accounts_*` と `shared_accounts`、`mfa_enabled` と `mfa_coverage`、`vpn_used` と `remote_desktop`
-
-画像が貼られたら読み、その画面から読み取れる範囲で回答の `id` を決める材料にする。読み取れない、迷うときは本人に確認するか `unknown` にする。画像に写った氏名やメールアドレスは記録しない。件数など数だけを使う。貼られなければ何も言わずに進める。
-
 #### 使う部品を選ぶ
 
 常に実行する 10 個の部品: `antivirus`、`disk_encryption`、`os_update`、`os_support`、`firewall`、`screen_lock`、`local_admin`、`remote_access`、`browser`、`cloud_sync`。

@@ -76,9 +76,13 @@ describe("SKILL.md", () => {
   });
 
   test("必要な流れが書いてある", () => {
-    for (const re of [/paths/, /selectsChecks/, /textEasy/, /unknown/, /later/, /スクリーンショット/, /社員PC結果|employeeResults/, /diagnosis\.json/, /目安で、安全を保証するものではない/, /ラベル/]) {
+    for (const re of [/paths/, /selectsChecks/, /textEasy/, /unknown/, /later/, /社員PC結果|employeeResults/, /diagnosis\.json/, /目安で、安全を保証するものではない/, /ラベル/]) {
       expect(body).toMatch(re);
     }
+  });
+
+  test("スクリーンショットを貼るよう頼まない", () => {
+    expect(body).not.toMatch(/貼れるなら|貼ってください/);
   });
 
   test("ホームの絶対パスを含まない", () => {
